@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FormMitra - AI Scholarship Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Kannada:wght@400;500;600&family=Noto+Sans+Devanagari:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+
+  <!-- ── Header ─────────────────────────────────────── -->
+  <header class="header">
+    <div class="header-top">
+      <div class="header-brand">
+        <div class="brand-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
+            <path d="M6 12v5c3 3 9 3 12 0v-5"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="header-title">FormMitra</h1>
+          <p class="header-subtitle">AI Scholarship Assistant</p>
+        </div>
+      </div>
+      <div class="header-controls">
+        <select id="lang-select" class="lang-chip" title="Select Language">
+          <option value="en">English</option>
+          <option value="kn">ಕನ್ನಡ (Kannada)</option>
+          <option value="hi">हिंदी (Hindi)</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <nav class="tab-nav">
+      <button type="button" class="tab-btn active" data-tab="tab-autofill">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+        </svg>
+        <span>Vault & Fill</span>
+      </button>
+      <button type="button" class="tab-btn" data-tab="tab-ask-ai">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+        </svg>
+        <span>Ask AI</span>
+      </button>
+      <button type="button" class="tab-btn" data-tab="tab-docs">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="16" y1="13" x2="8" y2="13"/>
+          <line x1="16" y1="17" x2="8" y2="17"/>
+        </svg>
+        <span>Doc Check</span>
+      </button>
+      <button type="button" class="tab-btn" data-tab="tab-review">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <path d="M9 11l3 3L22 4"/>
+          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+        </svg>
+        <span>Review</span>
+      </button>
+    </nav>
+  </header>
+
+  <!-- ── Main Tab Contents ──────────────────────────── -->
+  <main class="main-content">
+
+    <!-- ════ TAB 1: 1-Click Autofill + Local Encrypted Vault ════ -->
+    <section id="tab-autofill" class="tab-pane active">
+      <div class="vault-banner">
+        <div class="vault-badge">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" stroke-width="2.2">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+          <span>Local Vault (AES-GCM Encrypted)</span>
+        </div>
+        <p class="vault-desc">Your personal details never leave your device. Profile values are encrypted locally using Web Crypto and filled directly into your browser tab.</p>
+      </div>
+
+      <div class="action-bar-top">
+        <button type="button" id="btn-autofill" class="btn btn-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+          </svg>
+          <span>1-Click Autofill Form</span>
+        </button>
+        <div class="btn-group-secondary">
+          <button type="button" id="btn-save-vault" class="btn btn-secondary" title="Save profile to encrypted local storage">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+              <polyline points="17 21 17 13 7 13 7 21"/>
+              <polyline points="7 3 7 8 15 8"/>
+            </svg>
+            <span>Save Vault</span>
+          </button>
+          <button type="button" id="btn-load-demo" class="btn btn-ghost" title="Load sample student profile">
+            <span>Load Demo</span>
+          </button>
+        </div>
+      </div>
+
+      <div id="autofill-status" class="status-msg hidden"></div>
+
+      <!-- 16+ Profile Fields Form -->
+      <form id="vault-form" class="vault-form" autocomplete="off">
+        <div class="form-section-title">Personal & Identity</div>
+        <div class="field-row">
+          <div class="form-group">
+            <label for="prof-fullName">Full Name</label>
+            <input type="text" id="prof-fullName" name="fullName" placeholder="Rahul Kumar" />
+          </div>
+          <div class="form-group">
+            <label for="prof-dob">Date of Birth</label>
+            <input type="date" id="prof-dob" name="dob" />
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="form-group">
+            <label for="prof-gender">Gender</label>
+            <select id="prof-gender" name="gender">
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="prof-aadhaar">Aadhaar Number</label>
+            <input type="text" id="prof-aadhaar" name="aadhaar" placeholder="12-digit UID" maxlength="14" />
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="form-group">
+            <label for="prof-mobile">Mobile Number</label>
+            <input type="tel" id="prof-mobile" name="mobile" placeholder="9876543210" />
+          </div>
+          <div class="form-group">
+            <label for="prof-email">Email Address</label>
+            <input type="email" id="prof-email" name="email" placeholder="rahul@example.com" />
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="form-group">
+            <label for="prof-fatherName">Father's Name</label>
+            <input type="text" id="prof-fatherName" name="fatherName" placeholder="Father's full name" />
+          </div>
+          <div class="form-group">
+            <label for="prof-motherName">Mother's Name</label>
+            <input type="text" id="prof-motherName" name="motherName" placeholder="Mother's full name" />
+          </div>
+        </div>
+
+        <div class="form-section-title">Caste, Income & Certificates</div>
+        <div class="field-row">
+          <div class="form-group">
+            <label for="prof-category">Category / Caste</label>
+            <select id="prof-category" name="category">
+              <option value="General">General</option>
+              <option value="OBC">OBC (Category 1/2A/2B/3A/3B)</option>
+              <option value="SC">Scheduled Caste (SC)</option>
+              <option value="ST">Scheduled Tribe (ST)</option>
+              <option value="Minority">Religious Minority</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="prof-casteCertNo">Caste Certificate No</label>
+            <input type="text" id="prof-casteCertNo" name="casteCertNo" placeholder="RD0038912..." />
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="form-group">
+            <label for="prof-income">Annual Income (₹ Gross)</label>
+            <input type="text" id="prof-income" name="income" placeholder="180000" />
+          </div>
+          <div class="form-group">
+            <label for="prof-rdNumber">Income RD Number</label>
+            <input type="text" id="prof-rdNumber" name="rdNumber" placeholder="RD0038741..." />
+          </div>
+        </div>
+
+        <div class="form-section-title">Academic & College</div>
+        <div class="form-group">
+          <label for="prof-college">College / University</label>
+          <input type="text" id="prof-college" name="college" placeholder="BMS College of Engineering" />
+        </div>
+
+        <div class="field-row">
+          <div class="form-group">
+            <label for="prof-usn">USN / Roll Number</label>
+            <input type="text" id="prof-usn" name="usn" placeholder="1BM22CS091" />
+          </div>
+          <div class="form-group">
+            <label for="prof-year">Academic Year</label>
+            <select id="prof-year" name="year">
+              <option value="1st Year">1st Year</option>
+              <option value="2nd Year">2nd Year</option>
+              <option value="3rd Year">3rd Year</option>
+              <option value="4th Year">4th Year</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="form-group">
+            <label for="prof-course">Course / Degree</label>
+            <input type="text" id="prof-course" name="course" placeholder="B.Tech Computer Science" />
+          </div>
+          <div class="form-group">
+            <label for="prof-domicile">Domicile Status</label>
+            <select id="prof-domicile" name="domicile">
+              <option value="Karnataka Domicile">Karnataka Domicile (>7 yrs)</option>
+              <option value="Non-Karnataka">Non-Karnataka / Other</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-section-title">Bank & Communication Details</div>
+        <div class="field-row">
+          <div class="form-group">
+            <label for="prof-bankAccount">Bank Account No</label>
+            <input type="text" id="prof-bankAccount" name="bankAccount" placeholder="389102938102" />
+          </div>
+          <div class="form-group">
+            <label for="prof-ifsc">IFSC Code</label>
+            <input type="text" id="prof-ifsc" name="ifsc" placeholder="SBIN0040123" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="prof-address">Permanent Address</label>
+          <textarea id="prof-address" name="address" rows="2" placeholder="#42, 5th Cross, Malleshwaram"></textarea>
+        </div>
+
+        <div class="field-row">
+          <div class="form-group">
+            <label for="prof-district">District</label>
+            <input type="text" id="prof-district" name="district" placeholder="Bangalore Urban" />
+          </div>
+          <div class="form-group">
+            <label for="prof-state">State</label>
+            <input type="text" id="prof-state" name="state" placeholder="Karnataka" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="prof-pincode">PIN Code</label>
+          <input type="text" id="prof-pincode" name="pincode" placeholder="560003" maxlength="6" />
+        </div>
+      </form>
+    </section>
+
+    <!-- ════ TAB 2: Ask AI (Field Explainer & Voice) ════════════ -->
+    <section id="tab-ask-ai" class="tab-pane">
+      <div class="ask-ai-box">
+        <div class="ask-ai-header">
+          <span class="pill-label">Field Explainer</span>
+          <span class="active-lang-badge" id="ai-active-lang">English</span>
+        </div>
+        <p class="section-lead">Confused by confusing portal terminology? Tap a topic below or type any field label for clear scholarship guidance.</p>
+
+        <!-- Curated Topic Chips -->
+        <div class="chips-container">
+          <button type="button" class="topic-chip" data-topic="Gross vs Net Income">Gross vs Net Income</button>
+          <button type="button" class="topic-chip" data-topic="RD Number">RD Number</button>
+          <button type="button" class="topic-chip" data-topic="Domicile vs Native">Domicile vs Native</button>
+          <button type="button" class="topic-chip" data-topic="Caste Certificate">Caste Certificate</button>
+          <button type="button" class="topic-chip" data-topic="USN">USN</button>
+        </div>
+
+        <!-- Input & Voice Search Bar -->
+        <div class="search-bar">
+          <input type="text" id="ask-field-input" class="search-input" placeholder="Type a field label (e.g. RD Number)..." />
+          <button type="button" id="btn-mic" class="mic-btn" title="Voice Input (English, Kannada, Hindi)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="23"/>
+              <line x1="8" y1="23" x2="16" y2="23"/>
+            </svg>
+          </button>
+          <button type="button" id="btn-explain" class="btn btn-primary btn-sm">
+            <span>Explain</span>
+          </button>
+        </div>
+
+        <div id="mic-status" class="mic-status hidden">Listening... tap mic again to finish</div>
+
+        <!-- AI Explanation Card -->
+        <div id="ai-result-card" class="ai-result-card hidden">
+          <div class="result-header">
+            <span class="result-title" id="ai-result-title">Field Explanation</span>
+            <span class="result-badge">AI Verified</span>
+          </div>
+          <div class="result-body" id="ai-result-body"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════ TAB 3: Document Check Before Upload ═══════════════ -->
+    <section id="tab-docs" class="tab-pane">
+      <div class="doc-check-box">
+        <h2 class="doc-title">Document Quality & Seal Verifier</h2>
+        <p class="section-lead">Prevent scholarship rejections by pre-verifying document size (&lt; 2MB), blur/sharpness, and required official seals or stamps.</p>
+
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label for="doc-type-select">Document Type</label>
+          <select id="doc-type-select" class="doc-select">
+            <option value="Student ID">Student ID Card</option>
+            <option value="Income Certificate">Income Certificate (Nadakacheri / Tahsildar)</option>
+            <option value="Marksheet">Marksheet / Grade Card</option>
+          </select>
+        </div>
+
+        <!-- Upload Dropzone -->
+        <div class="upload-dropzone" id="upload-dropzone">
+          <input type="file" id="doc-file-input" accept="image/*,.pdf" class="file-input-hidden" />
+          <div class="dropzone-inner">
+            <div class="dropzone-icon">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
+            <div class="dropzone-text">
+              <span class="primary-text">Click to choose image or drag & drop</span>
+              <span class="sub-text">PNG, JPG, WEBP (&lt; 2MB)</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="doc-check-loading" class="check-loading hidden">
+          <div class="spinner-small"></div>
+          <span>Analyzing document clarity, size, and official seal...</span>
+        </div>
+
+        <!-- Verification Results Box -->
+        <div id="doc-results-box" class="doc-results-box hidden">
+          <div class="result-status-bar" id="doc-status-bar">
+            <div id="doc-status-icon"></div>
+            <div class="doc-status-text" id="doc-status-text"></div>
+          </div>
+          <div id="doc-issues-list" class="doc-issues-list"></div>
+          <div class="doc-details-note" id="doc-details-note"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════ TAB 4: Student Review & Approval ══════════════════ -->
+    <section id="tab-review" class="tab-pane">
+      <div class="review-box">
+        <div class="review-header">
+          <h2 class="doc-title">Student Review & Verification</h2>
+          <button type="button" id="btn-refresh-review" class="btn btn-secondary btn-sm">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 4 23 10 17 10"/>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
+            <span>Scan Page Fields</span>
+          </button>
+        </div>
+
+        <p class="section-lead">FormMitra strictly upholds student sovereignty. The extension never submits forms automatically. Review all values detected on the scholarship page before proceeding.</p>
+
+        <!-- Summary list of filled fields on active tab -->
+        <div id="review-fields-list" class="review-fields-list">
+          <div class="empty-state">Click "Scan Page Fields" or run "1-Click Autofill" to inspect filled values on the active page.</div>
+        </div>
+
+        <!-- Student Declaration Checkbox -->
+        <div class="declaration-card">
+          <label class="declaration-label">
+            <input type="checkbox" id="student-declaration-check" />
+            <span>I have personally reviewed all the scholarship details filled on this portal and declare that the information is true, accurate, and matches my official government documents.</span>
+          </label>
+        </div>
+
+        <div id="submit-guidance" class="submit-guidance alert-warning">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          <span id="guidance-text">Please check the student declaration above. On the portal page, final submission will remain disabled until you verify.</span>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>
