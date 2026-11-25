@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Encyclopedia &amp; Web Test Page</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 680px; margin: 24px auto; padding: 0 16px; line-height: 1.5; }
+    .form-group { margin-bottom: 12px; }
+    label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+    input, select, textarea { width: 100%; padding: 8px; box-sizing: border-box; }
+    .results { list-style: none; padding: 0; border: 1px solid #ddd; margin-top: 6px; }
+    .results li a { display: block; padding: 6px 10px; }
+    .below-fold { margin-top: 1100px; padding-top: 16px; border-top: 1px solid #ccc; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Open Encyclopedia</h1>
+    <p>Search verified reference articles on computing, physics, and mathematics.</p>
+    <input type="search" id="site-search" placeholder="Search encyclopedia..." aria-label="Search encyclopedia">
+    <ul id="search-results" class="results" role="listbox">
+      <li role="option"><a href="#ada-lovelace">Ada Lovelace — Pioneer of Computing</a></li>
+      <li role="option"><a href="#grace-hopper">Grace Hopper — Compiler Design</a></li>
+    </ul>
+  </header>
+  <main>
+    <h2 id="ada-lovelace">Ada Lovelace</h2>
+    <p>Augusta Ada King, Countess of Lovelace, wrote the first algorithm intended for Charles Babbage's Analytical Engine in 1843.</p>
+    <button type="button" id="btn-next">Next Article</button>
+    <form id="feedback-form">
+      <div class="form-group"><label for="full-name">Full Name</label><input id="full-name" name="fullName" type="text"></div>
+      <div class="form-group"><label for="email-box">Email Address</label><input id="email-box" name="email" type="email"></div>
+      <div class="form-group"><label for="plan-select">Country</label><select id="plan-select" name="country"><option value="US">United States</option><option value="IN">India</option><option value="DE">Germany</option></select></div>
+      <div class="form-group"><label for="message-box">Leave a comment</label><textarea id="message-box" name="comment" rows="2" placeholder="Write a message draft..."></textarea></div>
+      <div class="form-group"><label for="pan-box">PAN Number</label><input id="pan-box" name="pan" type="text"></div>
+      <div class="form-group"><label for="pw-box">Account Password</label><input id="pw-box" name="password" type="password"></div>
+      <button type="submit">Submit Feedback</button>
+      <button type="button">Pay Now</button>
+      <button type="button">Send Message</button>
+    </form>
+    <section class="below-fold">
+      <h2>History of Computation</h2>
+      <p>Early mechanical calculators paved the way for stored-program electronic computers in the twentieth century.</p>
+    </section>
+  </main>
+</body>
+</html>
