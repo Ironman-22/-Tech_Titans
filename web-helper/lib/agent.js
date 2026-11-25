@@ -105,6 +105,8 @@ function buildAgentSystemPrompt(langCode) {
     '{"reply": string, "action": {"type": "none|click|type|scroll|find|open_url", "id": string|null, "text": string|null, "direction": "up|down|top|bottom"|null, "target": "search|composer"|null, "url": string|null, "query": string|null, "reason": string}}',
     'ID RULE: Never invent an id. Every "id" MUST match an exact id from snapshot.interactive or snapshot.formFields, or be null.',
     'NAVIGATION RULE: If the user wants to find or visit a website and the current page is not that site, use open_url. After the page loads, use find/click/type on the new page as needed. For open_url, set EITHER url (http/https) OR query (Google search text), never both.',
+    'COMPOSER RULE: After clicking a chat, thread, or result when the user goal includes sending or writing a message, the NEXT step MUST be action type="type" with target="composer" and the message text (draft only — never press Enter or click Send).',
+    'LOOP RULE: If PREVIOUS STEP NOTES reports an action had no visible effect or was skipped, choose a different element or set action.type="none" and explain.',
     'TASK RULES: Using the site search box (type target="search") and clicking a matching result link/option is a normal task — do not refuse because the topic or result is a person name.',
     'If the goal is just a question answered by the snapshot, or the goal is complete, set action.type="none".',
     'SAFETY RULES: Never type into password or payment fields. Never click submit, pay, confirm, delete, sign out, send, or CAPTCHA buttons. Typing into a message box (target="composer") is draft-only and never sends.'
@@ -201,6 +203,88 @@ function abortableSleep(ms, ctl) {
   });
 }
 
+const STUCK_MSG = "I couldn't make that work on this page. Try clicking it yourself, or ask me something else.";
+
+function raceAbort(promise, ctl) {
+  return new Promise((resolve) => {
+    if (ctl.aborted) return resolve({ aborted: true });
+    let done = false;
+    const prev = ctl.onAbort;
+    const finish = (res) => {
+      if (done) return;
+      done = true;
+      ctl.onAbort = prev;
+      resolve(res);
+    };
+    ctl.onAbort = () => { if (prev) prev(); finish({ aborted: true }); };
+    Promise.resolve(promise).then((value) => finish({ aborted: false, value }), (err) => finish({ aborted: false, error: err }));
+  });
+}
+
+function hashText(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0).toString(16);
+}
+
+function computeFingerprint(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return 'none';
+  const count = Array.isArray(snapshot.interactive) ? snapshot.interactive.length : 0;
+  return `${snapshot.url || ''}|${snapshot.title || ''}|${hashText(String(snapshot.visibleText || '').slice(0, 1500))}|${count}`;
+}
+
+function actionSignature(action) {
+  if (!action) return '';
+  if (action.type === 'click') return `click:${action.id || ''}:${(action.text || '').toLowerCase()}`;
+  if (action.type === 'type') return `type:${action.target || ''}:${action.id || ''}:${(action.text || '').toLowerCase()}`;
+  if (action.type === 'scroll') return `scroll:${action.id || ''}:${action.direction || ''}`;
+  if (action.type === 'open_url') return `open_url:${action.url || ''}:${(action.query || '').toLowerCase()}`;
+  return `${action.type}:${(action.text || '').toLowerCase()}`;
+}
+
+function isMessageGoal(goal) {
+  return /\b(send|message|msg|text|reply|say|write|whatsapp|chat|dm)\b/i.test(String(goal || ''));
+}
+
+function describeEffectLabel(action, execRes) {
+  if (action.type === 'click') return `click "${execRes?.targetText || action.text}"`;
+  if (action.type === 'type') return `type "${action.text}"`;
+  if (action.type === 'scroll') return `scroll ${action.direction || 'page'}`;
+  if (action.type === 'open_url') return `open ${action.query || action.url}`;
+  return action.type;
+}
+
+function formatStepLine(action, execRes, changed) {
+  const tag = changed ? 'page changed' : 'no visible change';
+  if (action.type === 'click') return `Clicked: ${execRes?.targetText || action.text} (${tag})`;
+  if (action.type === 'type') return `Typed "${action.text}" into ${action.target} (${tag})`;
+  if (action.type === 'scroll') return `Scrolled ${action.direction || 'page'} (${tag})`;
+  if (action.type === 'open_url') return `Opened: ${action.query ? `Google search for: ${action.query}` : action.url} (${tag})`;
+  return `${action.type} (${tag})`;
+}
+
+async function waitForSettledSnapshot({ action, preFp, ctl, refreshSnapshot, state }) {
+  const delays = action.type === 'click' ? [400, 600, 1000, 1500, 2500] : (action.type === 'type' ? [600, 900] : [350]);
+  const checkChanged = async (settleMs) => {
+    const snap = await raceAbort(refreshSnapshot(false), ctl);
+    if (snap.aborted || ctl.aborted) return null;
+    const fp = computeFingerprint(state.snapshot);
+    if (fp === preFp || !settleMs) return { changed: fp !== preFp, fp };
+    if (!(await abortableSleep(settleMs, ctl))) return null;
+    const fin = await raceAbort(refreshSnapshot(false), ctl);
+    return (fin.aborted || ctl.aborted) ? null : { changed: true, fp: computeFingerprint(state.snapshot) };
+  };
+
+  const immediate = await checkChanged(350);
+  if (!immediate || immediate.changed) return immediate ? immediate.fp : null;
+  for (const ms of delays) {
+    if (!(await abortableSleep(ms, ctl))) return null;
+    const res = await checkChanged(300);
+    if (!res || res.changed) return res ? res.fp : null;
+  }
+  return preFp;
+}
+
 async function executeAction(action, sendAction) {
   if (action.type === 'open_url') return sendAction({ action: 'OPEN_URL', url: action.url });
   if (action.type === 'click') return sendAction({ action: 'CLICK', id: action.id });
@@ -212,51 +296,65 @@ async function executeAction(action, sendAction) {
 
 export async function runAgentLoop({
   goal, ctl, state, dom, sendAction, refreshSnapshot,
-  onReply, onError, onFind, onNoKey, onUnreadable, onAskApproval, onRetry
+  onReply, onError, onFind, onNoKey, onUnreadable, onStep, onAskApproval, onRetry
 }) {
   const stepNotes = [];
+  const attemptedActions = new Set();
+  let noEffectStreak = 0;
+
+  const setPending = (text) => {
+    pending.textContent = text;
+    if (!pending.isConnected) dom.chatMessages.appendChild(pending);
+    dom.chatMessages.parentElement.scrollTop = dom.chatMessages.parentElement.scrollHeight;
+  };
+  const pushNoEffect = (note) => {
+    noEffectStreak += 1;
+    stepNotes.push(note);
+    if (noEffectStreak >= 2) { onReply(STUCK_MSG, null); return true; }
+    return false;
+  };
+
   const pending = document.createElement('div');
   pending.className = 'msg msg-pending';
-  pending.textContent = 'Thinking...';
-  dom.chatMessages.appendChild(pending);
   dom.emptyState.classList.add('hidden');
-  dom.chatMessages.parentElement.scrollTop = dom.chatMessages.parentElement.scrollHeight;
+  setPending('Thinking...');
 
   try {
     for (let step = 0; step < 6; step++) {
       if (ctl.aborted) break;
       if (step > 0) {
-        pending.textContent = 'Waiting before next step...';
-        if (!(await abortableSleep(1000, ctl))) break;
+        setPending('Waiting before next step...');
+        if (!(await abortableSleep(400, ctl))) break;
       }
-      await refreshSnapshot(false);
-      if (ctl.aborted) break;
+      if ((await raceAbort(refreshSnapshot(false), ctl)).aborted || ctl.aborted) break;
 
       if (isUnreadableSnapshot(state.snapshot, state.restricted)) {
         pending.remove();
         const nav = step === 0 ? parseNavigationIntent(goal) : null;
         if (nav?.blocked) { onReply('Blocked unsafe URL scheme. Only http:// and https:// URLs are allowed.', null); return; }
         if (!nav) { onUnreadable(); return; }
-        const navDecision = await onAskApproval(describeApproval(nav), ctl);
-        if (navDecision !== 'allow' || ctl.aborted) return;
-        const navRes = await executeAction(nav, sendAction);
-        if (ctl.aborted) break;
+        if ((await onAskApproval(describeApproval(nav), ctl)) !== 'allow' || ctl.aborted) return;
+        const preFp = computeFingerprint(state.snapshot);
+        attemptedActions.add(actionSignature(nav));
+        const navCall = await raceAbort(executeAction(nav, sendAction), ctl);
+        if (navCall.aborted || ctl.aborted) break;
+        const navRes = navCall.value || {};
         if (!navRes.success && !navRes.ok) { onError('Could not open page.', navRes.error || '', onRetry); return; }
+        if ((await raceAbort(refreshSnapshot(false), ctl)).aborted || ctl.aborted) break;
+        if (onStep) onStep(formatStepLine(nav, navRes, computeFingerprint(state.snapshot) !== preFp));
         stepNotes.push(nav.query ? `Opened Google search for: ${nav.query}` : `Opened ${nav.url}`);
         continue;
       }
 
-      pending.textContent = 'Thinking...';
-      if (!pending.isConnected) dom.chatMessages.appendChild(pending);
-      dom.chatMessages.parentElement.scrollTop = dom.chatMessages.parentElement.scrollHeight;
-
-      const resp = await sendAction({
+      setPending('Thinking...');
+      const llmCall = await raceAbort(sendAction({
         action: 'LLM_CALL',
         systemPrompt: buildAgentSystemPrompt(state.lang),
         messages: [...state.history.slice(-10), { role: 'user', content: buildStepUserPrompt({ goal, stepNotes, snapshot: state.snapshot }) }],
         taskId: state.taskId
-      });
-      if (ctl.aborted) break;
+      }), ctl);
+      if (llmCall.aborted || ctl.aborted) break;
+      const resp = llmCall.value || {};
 
       if (!resp.ok || !resp.data || typeof resp.data.reply !== 'string') {
         pending.remove();
@@ -275,34 +373,53 @@ export async function runAgentLoop({
       }
 
       pending.remove();
-      if (replyText) onReply(replyText, resp.provider);
+      const sig = actionSignature(action);
+      if (attemptedActions.has(sig)) {
+        if (pushNoEffect(`Skipped duplicate ${describeEffectLabel(action, null)}. Choose a different element or finish.`)) return;
+        continue;
+      }
 
       const isComposerType = action.type === 'type' && action.target === 'composer';
       const skipApproval = action.type !== 'open_url' && !isComposerType && dom.chkAutoAllow.checked && isAutoAllowedNavClick(action);
       const decision = skipApproval ? 'allow' : await onAskApproval(describeApproval(action), ctl);
       if (decision === 'stop' || ctl.aborted) break;
-      if (decision === 'skip') { stepNotes.push(`User skipped ${action.type}. Do not repeat it.`); continue; }
+      if (decision === 'skip') { attemptedActions.add(sig); stepNotes.push(`User skipped ${action.type}. Do not repeat it.`); continue; }
 
-      const execRes = await executeAction(action, sendAction);
-      if (ctl.aborted) break;
+      const preFp = computeFingerprint(state.snapshot);
+      attemptedActions.add(sig);
+      const execCall = await raceAbort(executeAction(action, sendAction), ctl);
+      if (execCall.aborted || ctl.aborted) break;
+      const execRes = execCall.value || {};
       if (execRes.error === 'blocked') { onReply('Action blocked by safety guard.', null); return; }
-      if (!execRes.success && !execRes.ok) { stepNotes.push(`Action ${action.type} failed.`); continue; }
-
-      if (action.type === 'open_url') {
-        stepNotes.push(action.query ? `Opened Google search for: ${action.query}` : `Opened ${action.url}`);
+      if (!execRes.success && !execRes.ok) {
+        if (pushNoEffect(`Last action ${describeEffectLabel(action, execRes)} failed and had no visible effect. Choose a different element or finish.`)) return;
         continue;
       }
+
       if (isComposerType) {
         const msg = 'Draft typed. Review it and press Send yourself.';
         state.history.push({ role: 'user', content: goal }, { role: 'assistant', content: msg });
         onReply(msg, null);
         return;
       }
-      if (action.type === 'find') {
-        onFind(action.text, execRes.count || 0, execRes.index || 0);
-        return;
+      if (action.type === 'find') { onFind(action.text, execRes.count || 0, execRes.index || 0); return; }
+
+      setPending('Checking page...');
+      const postFp = await waitForSettledSnapshot({ action, preFp, ctl, refreshSnapshot, state });
+      pending.remove();
+      if (postFp === null || ctl.aborted) break;
+
+      const changed = postFp !== preFp;
+      if (onStep) onStep(formatStepLine(action, execRes, changed));
+      if (!changed) {
+        if (pushNoEffect(`Last action ${describeEffectLabel(action, execRes)} had no visible effect. Choose a different element or finish.`)) return;
+      } else {
+        noEffectStreak = 0;
+        const msgHint = isMessageGoal(goal) && action.type === 'click'
+          ? ' If the user goal included sending a message, the next step is TYPE target "composer" (draft only, never send).'
+          : '';
+        stepNotes.push(`Completed ${describeEffectLabel(action, execRes)} and page changed.${msgHint}`);
       }
-      stepNotes.push(`Completed ${action.type}.`);
     }
 
     onReply(ctl.aborted ? 'Stopped.' : 'Reached maximum step limit.', null);

@@ -7,7 +7,7 @@
  *   FIND              (Sidepanel -> Background -> Content) : { action: 'FIND', query } -> { ok, count, index }
  *   FIND_NAV          (Sidepanel -> Background -> Content) : { action: 'FIND_NAV', dir: 'next'|'prev' } -> { ok, count, index }
  *   FIND_CLEAR        (Sidepanel -> Background -> Content) : { action: 'FIND_CLEAR' } -> { ok: true }
- *   CLICK             (Sidepanel -> Background -> Content) : { action: 'CLICK', id } -> { success, navigated?, error? }
+ *   CLICK             (Sidepanel -> Background -> Content) : { action: 'CLICK', id } -> { success, targetText?, navigated?, error? }
  *   TYPE              (Sidepanel -> Background -> Content) : { action: 'TYPE', target, text, id? } -> { success, target?, label?, error? }
  *   SCROLL            (Sidepanel -> Background -> Content) : { action: 'SCROLL', id?, direction? } -> { success }
  *   TRANSLATE_COLLECT (Sidepanel -> Background -> Content) : { action: 'TRANSLATE_COLLECT', targetLang, viewportOnly? } -> { ok, items, remainingCount }
@@ -20,6 +20,7 @@
  *   LLM_CALL          (Sidepanel -> Background)            : { action: 'LLM_CALL', systemPrompt, messages, taskId? } -> { ok, data, provider, model } | { ok: false, error, summary, code? }
  *   TRANSCRIBE        (Sidepanel -> Background)            : { action: 'TRANSCRIBE', base64, mimeType, taskId? } -> { ok, data: { text, language }, provider } | { ok: false, error, summary, code? }
  *   OPEN_URL          (Sidepanel -> Background)            : { action: 'OPEN_URL', url } -> { ok, success, url?, error? }
+ *   CANCEL_TASK       (Sidepanel -> Background)            : { action: 'CANCEL_TASK', taskId? } -> { ok: true }
  *   TEST_PROVIDER     (Options -> Background)              : { action: 'TEST_PROVIDER', provider, apiKey?, model? } -> { ok, provider, model } | { ok: false, error, summary }
  *   LIST_MODELS       (Options -> Background)              : { action: 'LIST_MODELS', provider, apiKey? } -> { ok, models } | { ok: false, error, summary }
  */
@@ -35,6 +36,7 @@ const TAB_ACTIONS = new Set([
 
 const cooldownUntil = { gemini: 0, groq: 0 };
 const taskProviderAffinity = new Map();
+const taskControllers = new Map();
 let llmQueue = Promise.resolve();
 
 if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
@@ -198,34 +200,41 @@ async function runQueuedProviderCall({ invoke, taskId, autoDefault = 'gemini', r
     return { ok: false, code: 'NO_KEY', summary: 'Add an API key in Settings.', error: 'No Gemini or Groq API key configured.' };
   }
 
+  const ctl = new AbortController();
+  if (taskId) taskControllers.set(taskId, ctl);
   const errors = [];
   let lastSummary = 'Could not reach an AI provider.';
 
-  for (const entry of candidates) {
-    const now = Date.now();
-    if (cooldownUntil[entry.provider] > now) {
-      const secs = Math.ceil((cooldownUntil[entry.provider] - now) / 1000);
-      errors.push(`${providerLabel(entry.provider)}: Rate limit cooldown (${secs}s remaining)`);
-      lastSummary = `${providerLabel(entry.provider)} is temporarily rate-limited.`;
-      continue;
-    }
-    try {
-      const res = await callWithRetry(() => invoke(entry));
-      if (recordAffinity && taskId) taskProviderAffinity.set(taskId, entry.provider);
-      return res;
-    } catch (err) {
-      if (err instanceof ProviderError) {
-        if (err.status === 429) cooldownUntil[entry.provider] = Date.now() + (err.retryAfterMs || 30000);
-        lastSummary = `${providerLabel(entry.provider)}: ${err.summary}.`;
-        errors.push(`${providerLabel(entry.provider)}: ${err.message}`);
-      } else {
-        lastSummary = `${providerLabel(entry.provider)} request failed.`;
-        errors.push(`${providerLabel(entry.provider)}: ${err.message || 'Unknown error'}`);
+  try {
+    for (const entry of candidates) {
+      if (ctl.signal.aborted) return { ok: false, summary: 'Cancelled.', error: 'Task cancelled.' };
+      const now = Date.now();
+      if (cooldownUntil[entry.provider] > now) {
+        const secs = Math.ceil((cooldownUntil[entry.provider] - now) / 1000);
+        errors.push(`${providerLabel(entry.provider)}: Rate limit cooldown (${secs}s remaining)`);
+        lastSummary = `${providerLabel(entry.provider)} is temporarily rate-limited.`;
+        continue;
+      }
+      try {
+        const res = await callWithRetry(() => invoke(entry, ctl.signal));
+        if (recordAffinity && taskId) taskProviderAffinity.set(taskId, entry.provider);
+        return res;
+      } catch (err) {
+        if (ctl.signal.aborted) return { ok: false, summary: 'Cancelled.', error: 'Task cancelled.' };
+        if (err instanceof ProviderError) {
+          if (err.status === 429) cooldownUntil[entry.provider] = Date.now() + (err.retryAfterMs || 30000);
+          lastSummary = `${providerLabel(entry.provider)}: ${err.summary}.`;
+          errors.push(`${providerLabel(entry.provider)}: ${err.message}`);
+        } else {
+          lastSummary = `${providerLabel(entry.provider)} request failed.`;
+          errors.push(`${providerLabel(entry.provider)}: ${err.message || 'Unknown error'}`);
+        }
       }
     }
+    return { ok: false, summary: candidates.length > 1 ? 'Both AI providers failed.' : lastSummary, error: errors.join(' | ') };
+  } finally {
+    if (taskId && taskControllers.get(taskId) === ctl) taskControllers.delete(taskId);
   }
-
-  return { ok: false, summary: candidates.length > 1 ? 'Both AI providers failed.' : lastSummary, error: errors.join(' | ') };
 }
 
 async function handleOpenUrl(rawUrl) {
@@ -296,9 +305,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     enqueueCall(() => runQueuedProviderCall({
       taskId: message.taskId,
       autoDefault: 'gemini',
-      invoke: (entry) => callProvider({ ...entry, systemPrompt: message.systemPrompt, messages: message.messages })
+      invoke: (entry, signal) => callProvider({ ...entry, systemPrompt: message.systemPrompt, messages: message.messages, signal })
     })).then((r) => safeReply(sendResponse, r)).catch((e) => safeReply(sendResponse, { ok: false, summary: 'Request failed.', error: e.message }));
     return true;
+  }
+
+  if (message.action === 'CANCEL_TASK') {
+    if (message.taskId && taskControllers.has(message.taskId)) {
+      try { taskControllers.get(message.taskId).abort(); } catch (_) {}
+      taskControllers.delete(message.taskId);
+    } else {
+      for (const c of taskControllers.values()) { try { c.abort(); } catch (_) {} }
+      taskControllers.clear();
+    }
+    safeReply(sendResponse, { ok: true });
+    return false;
   }
 
   if (message.action === 'TRANSCRIBE') {

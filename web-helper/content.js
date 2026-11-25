@@ -98,13 +98,14 @@
   }
 
   function collectInteractive() {
-    const prioritySel = '[role="option"], [role="tab"], [role="listbox"] a, [role="listbox"] li, main a, [role="main"] a, button, [role="button"], summary';
+    const prioritySel = '[role="listbox"] a, [role="option"] a, main a, [role="main"] a, button, [role="button"], [role="tab"], [role="grid"] [role="row"], [role="list"] [role="listitem"], [role="option"], [role="listbox"] li, summary';
     const allSel = 'a, button, [role="button"], [role="tab"], [role="link"], [role="option"], [role="listitem"], [role="row"], summary';
     const seen = new Set();
     const out = [];
 
     const addNode = (el) => {
       if (out.length >= 40 || seen.has(el) || !isVisible(el)) return;
+      if (el.matches('li, [role="option"], [role="listitem"]') && el.querySelector('a[href], button, [role="button"]')) return;
       const text = collapseWs(el.innerText || el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || el.value).slice(0, 80);
       if (!text) return;
       seen.add(el);
@@ -268,17 +269,38 @@
   function handleClick(id) {
     const el = findByStableId(id);
     if (isClickBlocked(el)) return { success: false, error: 'blocked' };
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    // Safety: single guarded element click in extension; verified visible, enabled, non-submit, non-sensitive, and allowed role/text.
-    el.click();
-    return { success: true };
+
+    el.scrollIntoView({ block: 'center' });
+    const rect = el.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const hit = document.elementFromPoint(cx, cy);
+    const target = hit && el.contains(hit) ? hit : el;
+
+    // Safety: single guarded activation sequence in extension; verified visible, enabled, non-submit, non-sensitive, and allowed role/text by isClickBlocked(el) above.
+    const common = { bubbles: true, cancelable: true, composed: true, view: window, clientX: cx, clientY: cy, button: 0 };
+    const sequence = [
+      ['pointerdown', PointerEvent, 1],
+      ['mousedown', MouseEvent, 1],
+      ['pointerup', PointerEvent, 0],
+      ['mouseup', MouseEvent, 0],
+      ['click', MouseEvent, 0]
+    ];
+    for (const [evType, Ctor, buttons] of sequence) {
+      const extra = Ctor === PointerEvent ? { pointerId: 1, pointerType: 'mouse', isPrimary: true } : {};
+      target.dispatchEvent(new Ctor(evType, { ...common, buttons, ...extra }));
+    }
+
+    const targetText = collapseWs(el.innerText || el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || el.value || target.textContent || '').slice(0, 40);
+    return { success: true, targetText };
   }
 
   function findSearchTarget() {
     const groups = [
       () => document.querySelectorAll('input[type="search"]'),
       () => document.querySelectorAll('[role="searchbox"]'),
-      () => document.querySelectorAll('[contenteditable="true"][aria-label*="search" i], [contenteditable=""][aria-label*="search" i]'),
+      () => Array.from(document.querySelectorAll('[contenteditable="true"], [contenteditable=""], [role="textbox"]'))
+        .filter((el) => /search|find/i.test(`${el.getAttribute('aria-label') || ''} ${el.getAttribute('placeholder') || ''} ${el.getAttribute('aria-placeholder') || ''} ${el.getAttribute('title') || ''}`)),
       () => Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="password"]):not([type="submit"]):not([type="button"]):not([type="checkbox"]):not([type="radio"]):not([type="file"])'))
         .filter((el) => /search|find/i.test(`${el.placeholder || ''} ${el.getAttribute('aria-label') || ''} ${el.name || ''}`))
     ];

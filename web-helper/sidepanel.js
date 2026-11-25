@@ -2,7 +2,7 @@
 
 import { getSettings, saveSettingsPatch, getSavedDetails } from './lib/storage.js';
 import { classifyInput, isUnreadableSnapshot, normalizeDirectUrlOrQuery, runAgentLoop } from './lib/agent.js';
-import { appendUserMessage, appendAssistantMessage, appendFindCard, appendErrorBubble, promptActionApproval, appendFormFillCard, appendUnreadablePageCard } from './lib/chat-ui.js';
+import { appendUserMessage, appendAssistantMessage, appendFindCard, appendErrorBubble, promptActionApproval, appendFormFillCard, appendUnreadablePageCard, appendStepLine } from './lib/chat-ui.js';
 import { runViewportTranslation } from './lib/translate.js';
 import { buildFormFillPrompt, resolveFormFillPlan } from './lib/form-fill.js';
 import { mountSavedDetailsUI } from './lib/details-ui.js';
@@ -109,6 +109,8 @@ function setRunning(flag) {
 function stopCurrentTask() {
   if (!state.abortCtl) return;
   state.abortCtl.aborted = true;
+  sendAction({ action: 'CANCEL_TASK', taskId: state.taskId });
+  state.taskId = createTaskId();
   if (typeof state.abortCtl.onAbort === 'function') state.abortCtl.onAbort();
 }
 
@@ -328,6 +330,7 @@ async function handleUserSubmit(rawText, isRetry = false) {
       onFind: (q, cnt, idx) => appendFindCard(dom.chatMessages, dom.emptyState, q, cnt, idx, sendAction),
       onNoKey: () => dom.noKeyBanner.classList.remove('hidden'),
       onUnreadable: showUnreadableCard,
+      onStep: (txt) => appendStepLine(dom.chatMessages, dom.emptyState, txt),
       onAskApproval: (promptText, c) => promptActionApproval(dom.chatMessages, dom.emptyState, promptText, c),
       onRetry: () => handleUserSubmit(input, true)
     });

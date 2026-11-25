@@ -77,7 +77,7 @@ function base64ToBlob(base64, mimeType) {
   return new Blob([bytes], { type: mimeType || 'audio/webm' });
 }
 
-async function callGemini({ apiKey, model, systemPrompt, messages }) {
+async function callGemini({ apiKey, model, systemPrompt, messages, signal }) {
   const url = `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`;
   const body = {
     contents: messages.map((m) => ({
@@ -93,7 +93,8 @@ async function callGemini({ apiKey, model, systemPrompt, messages }) {
     resp = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal
     });
   } catch (netErr) {
     throw new ProviderError('gemini', 0, 'Network error', netErr.message);
@@ -110,7 +111,7 @@ async function callGemini({ apiKey, model, systemPrompt, messages }) {
   }
 }
 
-async function callGroq({ apiKey, model, systemPrompt, messages }) {
+async function callGroq({ apiKey, model, systemPrompt, messages, signal }) {
   const fullMessages = [];
   if (systemPrompt) fullMessages.push({ role: 'system', content: systemPrompt });
   messages.forEach((m) => fullMessages.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') }));
@@ -120,7 +121,8 @@ async function callGroq({ apiKey, model, systemPrompt, messages }) {
     resp = await fetch(`${GROQ_BASE}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model, messages: fullMessages, response_format: { type: 'json_object' }, temperature: 0.2 })
+      body: JSON.stringify({ model, messages: fullMessages, response_format: { type: 'json_object' }, temperature: 0.2 }),
+      signal
     });
   } catch (netErr) {
     throw new ProviderError('groq', 0, 'Network error', netErr.message);
@@ -137,9 +139,9 @@ async function callGroq({ apiKey, model, systemPrompt, messages }) {
   }
 }
 
-export function callProvider({ provider, apiKey, model, systemPrompt, messages }) {
-  if (provider === 'gemini') return callGemini({ apiKey, model, systemPrompt, messages });
-  if (provider === 'groq') return callGroq({ apiKey, model, systemPrompt, messages });
+export function callProvider({ provider, apiKey, model, systemPrompt, messages, signal }) {
+  if (provider === 'gemini') return callGemini({ apiKey, model, systemPrompt, messages, signal });
+  if (provider === 'groq') return callGroq({ apiKey, model, systemPrompt, messages, signal });
   throw new ProviderError(provider, 400, 'Unknown provider', String(provider));
 }
 

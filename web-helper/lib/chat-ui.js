@@ -286,3 +286,10 @@ export function appendUnreadablePageCard(container, emptyState, onNavigate) {
   appendAndScroll(container, emptyState, wrap);
   return input;
 }
+
+export function appendStepLine(container, emptyState, text) {
+  const el = document.createElement('div');
+  el.className = 'msg msg-step';
+  el.textContent = text;
+  appendAndScroll(container, emptyState, el);
+}
