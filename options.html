@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FormMitra — Settings</title>
+  <link rel="stylesheet" href="options.css">
+  <link rel="stylesheet" href="details.css">
+</head>
+<body>
+  <main class="container">
+    <header class="page-header">
+      <div class="brand">
+        <svg class="brand-mark" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect width="24" height="24" rx="6" fill="#0B6E6E"/>
+          <path d="M7 8.5h10M7 12h7M7 15.5h10" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <div>
+          <h1>FormMitra Settings</h1>
+          <p class="subtitle">API keys and saved details stay locally in your browser.</p>
+        </div>
+      </div>
+    </header>
+
+    <section class="section" aria-labelledby="heading-providers">
+      <div class="section-header">
+        <h2 id="heading-providers">AI providers</h2>
+        <button id="btn-refresh-models" type="button" class="btn btn-secondary">Refresh models</button>
+      </div>
+      <div id="models-status" class="status-line" aria-live="polite"></div>
+
+      <article class="card">
+        <h3>Google Gemini</h3>
+        <div class="field">
+          <label for="gemini-key">Gemini API Key</label>
+          <div class="input-row">
+            <input id="gemini-key" type="password" placeholder="Paste your Gemini API key" autocomplete="off">
+            <button id="btn-save-gemini" type="button" class="btn btn-primary">Save</button>
+            <button id="btn-test-gemini" type="button" class="btn btn-secondary">Test Connection</button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="gemini-model">Model</label>
+          <select id="gemini-model">
+            <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+          </select>
+        </div>
+        <div id="gemini-status" class="status-line" aria-live="polite"></div>
+      </article>
+
+      <article class="card">
+        <h3>Groq</h3>
+        <div class="field">
+          <label for="groq-key">Groq API Key</label>
+          <div class="input-row">
+            <input id="groq-key" type="password" placeholder="Paste your Groq API key" autocomplete="off">
+            <button id="btn-save-groq" type="button" class="btn btn-primary">Save</button>
+            <button id="btn-test-groq" type="button" class="btn btn-secondary">Test Connection</button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="groq-model">Model</label>
+          <select id="groq-model">
+            <option value="openai/gpt-oss-120b">openai/gpt-oss-120b</option>
+          </select>
+        </div>
+        <div id="groq-status" class="status-line" aria-live="polite"></div>
+      </article>
+    </section>
+
+    <section class="section" aria-labelledby="heading-details">
+      <h2 id="heading-details">Saved details</h2>
+      <article class="card">
+        <div id="saved-details-status" class="details-status" aria-live="polite"></div>
+        <div id="saved-details-container"></div>
+      </article>
+    </section>
+
+    <section class="section" aria-labelledby="heading-data">
+      <h2 id="heading-data">Data</h2>
+      <article class="card data-card">
+        <p class="data-desc">Remove saved API keys, model selections, saved details, and preferences from local browser storage.</p>
+        <div class="data-actions">
+          <button id="btn-delete-all" type="button" class="btn btn-danger">Delete all my data</button>
+          <span id="data-status" class="status-line" aria-live="polite"></span>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <script type="module" src="options.js"></script>
+</body>
+</html>
