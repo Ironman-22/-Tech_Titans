@@ -3,27 +3,45 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Allow Microphone — Web Helper</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <title>Allow Microphone — FormMitra</title>
   <style>
     :root {
-      --teal: #0B6E6E;
-      --teal-hover: #095c5c;
-      --text-1: #111827;
-      --text-2: #6B7280;
-      --bg: #F9FAFB;
+      --accent: #0B6E6E;
+      --accent-hover: #085656;
+      --bg: #F6F7F8;
       --surface: #FFFFFF;
-      --divider: #E5E7EB;
+      --border: #DCE0E5;
+      --text: #14181C;
+      --muted: #5C6670;
+      --ok-bg: #ECFDF5;
+      --ok-text: #065F46;
+      --err-bg: #FEF2F2;
+      --err-text: #991B1B;
       --radius: 8px;
-      --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      --font: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans Devanagari', 'Noto Sans Kannada', 'Nirmala UI', 'Tunga', sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --accent: #1B9A9A;
+        --accent-hover: #147E7E;
+        --bg: #111417;
+        --surface: #1A1F24;
+        --border: #2C333B;
+        --text: #EEF1F4;
+        --muted: #9BA6B2;
+        --ok-bg: #103224;
+        --ok-text: #6EE7B7;
+        --err-bg: #2C1515;
+        --err-text: #FCA5A5;
+      }
     }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: var(--font);
+      font-size: 14px;
+      line-height: 1.5;
       background: var(--bg);
-      color: var(--text-1);
+      color: var(--text);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -32,83 +50,42 @@
     }
     .card {
       background: var(--surface);
-      border: 1px solid var(--divider);
+      border: 1px solid var(--border);
       border-radius: var(--radius);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
       max-width: 440px;
       width: 100%;
-      padding: 32px 28px;
+      padding: 32px 24px;
       text-align: center;
     }
-    .icon-badge {
-      width: 52px;
-      height: 52px;
-      background: #E8F4F4;
-      color: var(--teal);
-      border-radius: 50%;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 16px;
-    }
-    h1 {
-      font-size: 20px;
-      font-weight: 600;
-      margin-bottom: 8px;
-    }
-    p.desc {
-      font-size: 13px;
-      color: var(--text-2);
-      line-height: 1.5;
-      margin-bottom: 24px;
-    }
+    h1 { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
+    .desc { font-size: 13px; color: var(--muted); margin-bottom: 24px; }
     .btn {
       font-family: var(--font);
       font-size: 14px;
       font-weight: 500;
-      padding: 10px 24px;
-      background: var(--teal);
-      color: #ffffff;
+      padding: 10px 20px;
+      background: var(--accent);
+      color: #FFFFFF;
       border: none;
       border-radius: var(--radius);
       cursor: pointer;
-      transition: background 0.15s;
     }
-    .btn:hover { background: var(--teal-hover); }
+    .btn:hover:not(:disabled) { background: var(--accent-hover); }
     .btn:disabled { opacity: 0.6; cursor: not-allowed; }
-    .status-line {
-      margin-top: 18px;
-      font-size: 13px;
-      line-height: 1.5;
-      min-height: 20px;
-    }
-    .status-line.success {
-      color: #065F46;
-      background: #D1FAE5;
-      border-radius: 6px;
-      padding: 8px 12px;
-    }
-    .status-line.error {
-      color: #991B1B;
-      background: #FEE2E2;
-      border-radius: 6px;
-      padding: 8px 12px;
-    }
+    .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .status-line { margin-top: 16px; font-size: 13px; min-height: 20px; border-radius: var(--radius); padding: 8px 12px; }
+    .status-line:empty { padding: 0; }
+    .status-line.success { background: var(--ok-bg); color: var(--ok-text); }
+    .status-line.error { background: var(--err-bg); color: var(--err-text); }
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="icon-badge">
-      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <rect x="9" y="3" width="6" height="11" rx="3"/>
-        <path d="M5 10a7 7 0 0 0 14 0M12 17v4M8 21h8"/>
-      </svg>
-    </div>
+  <main class="card">
     <h1>Allow Microphone</h1>
-    <p class="desc">Web Helper needs microphone access to transcribe voice queries in English, Hindi, and Kannada. Click below to grant permission.</p>
-    <button id="allow-mic-btn" class="btn">Allow microphone</button>
-    <div id="status-line" class="status-line"></div>
-  </div>
+    <p class="desc">FormMitra uses your microphone for voice input in English, Hindi, and Kannada. Your voice is transcribed only when you press the mic button.</p>
+    <button id="allow-mic-btn" type="button" class="btn">Allow microphone</button>
+    <div id="status-line" class="status-line" aria-live="polite"></div>
+  </main>
   <script src="permission.js"></script>
 </body>
 </html>

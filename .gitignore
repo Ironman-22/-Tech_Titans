@@ -1,0 +1,31 @@
+# Dependencies & build output
+node_modules/
+dist/
+build/
+out/
+.vite/
+.pytest_cache/
+__pycache__/
+*.pyc
+
+# Sensitive files & keys
+.env*
+*.pem
+*.key
+
+# IDE, OS & agent tooling
+.vscode/
+.idea/
+.gemini/
+.agent/
+.claude/
+.cursor/
+.DS_Store
+Thumbs.db
+
+# Logs & archives
+*.log
+logs/
+*.zip
+*.tmp
+*.bak

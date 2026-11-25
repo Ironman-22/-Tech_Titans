@@ -1,246 +1,331 @@
-// FormMitra — Background Service Worker
-// Manages tab tracking, proxies all backend/Gemini API calls, and relays messages between Side Panel and Content Script.
+/*
+ * FormMitra — Background Service Worker (MV3)
+ *
+ * Message Actions:
+ *   PING              (Background -> Content)            : { action: 'PING' } -> { ok: true, instanceId }
+ *   SNAPSHOT          (Sidepanel -> Background -> Content) : { action: 'SNAPSHOT' } -> { ok, snapshot } | { ok: false, error, restricted? }
+ *   FIND              (Sidepanel -> Background -> Content) : { action: 'FIND', query } -> { ok, count, index }
+ *   FIND_NAV          (Sidepanel -> Background -> Content) : { action: 'FIND_NAV', dir: 'next'|'prev' } -> { ok, count, index }
+ *   FIND_CLEAR        (Sidepanel -> Background -> Content) : { action: 'FIND_CLEAR' } -> { ok: true }
+ *   CLICK             (Sidepanel -> Background -> Content) : { action: 'CLICK', id } -> { success, navigated?, error? }
+ *   TYPE              (Sidepanel -> Background -> Content) : { action: 'TYPE', target, text, id? } -> { success, target?, label?, error? }
+ *   SCROLL            (Sidepanel -> Background -> Content) : { action: 'SCROLL', id?, direction? } -> { success }
+ *   TRANSLATE_COLLECT (Sidepanel -> Background -> Content) : { action: 'TRANSLATE_COLLECT', targetLang, viewportOnly? } -> { ok, items, remainingCount }
+ *   TRANSLATE_APPLY   (Sidepanel -> Background -> Content) : { action: 'TRANSLATE_APPLY', targetLang, entries } -> { ok, applied }
+ *   TRANSLATE_RESTORE (Sidepanel -> Background -> Content) : { action: 'TRANSLATE_RESTORE' } -> { ok, restored }
+ *   TRANSLATE_DIRTY   (Content -> Sidepanel broadcast)     : { action: 'TRANSLATE_DIRTY' } (no response required)
+ *   FILL              (Sidepanel -> Background -> Content) : { action: 'FILL', entries: [{ id, value, tier }] } -> { ok, success, count }
+ *   INSERT_VALUE      (Sidepanel -> Background -> Content) : { action: 'INSERT_VALUE', value } -> { ok, success, error? }
+ *   HIGHLIGHT_CLEAR   (Sidepanel -> Background -> Content) : { action: 'HIGHLIGHT_CLEAR' } -> { ok: true }
+ *   LLM_CALL          (Sidepanel -> Background)            : { action: 'LLM_CALL', systemPrompt, messages, taskId? } -> { ok, data, provider, model } | { ok: false, error, summary, code? }
+ *   TRANSCRIBE        (Sidepanel -> Background)            : { action: 'TRANSCRIBE', base64, mimeType, taskId? } -> { ok, data: { text, language }, provider } | { ok: false, error, summary, code? }
+ *   OPEN_URL          (Sidepanel -> Background)            : { action: 'OPEN_URL', url } -> { ok, success, url?, error? }
+ *   TEST_PROVIDER     (Options -> Background)              : { action: 'TEST_PROVIDER', provider, apiKey?, model? } -> { ok, provider, model } | { ok: false, error, summary }
+ *   LIST_MODELS       (Options -> Background)              : { action: 'LIST_MODELS', provider, apiKey? } -> { ok, models } | { ok: false, error, summary }
+ */
 
-console.log('[FormMitra:Background] Service worker initializing...');
+import { getSettings, validateKeyForProvider } from './lib/storage.js';
+import { callProvider, transcribeAudio, listProviderModels, ProviderError } from './lib/providers.js';
 
-const BACKEND_BASE = 'http://localhost:8000';
+const RESTRICTED_URL_RX = /^(chrome|chrome-extension|edge|about|devtools|view-source):|^https?:\/\/(chromewebstore\.google\.com|chrome\.google\.com\/webstore|microsoftedge\.microsoft\.com\/addons)/i;
+const TAB_ACTIONS = new Set([
+  'SNAPSHOT', 'FIND', 'FIND_NAV', 'FIND_CLEAR', 'CLICK', 'TYPE', 'SCROLL',
+  'TRANSLATE_COLLECT', 'TRANSLATE_APPLY', 'TRANSLATE_RESTORE', 'FILL', 'INSERT_VALUE', 'HIGHLIGHT_CLEAR'
+]);
 
-// Enable side panel on extension action click
+const cooldownUntil = { gemini: 0, groq: 0 };
+const taskProviderAffinity = new Map();
+let llmQueue = Promise.resolve();
+
 if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch((err) => {
-    console.warn('[FormMitra:Background] setPanelBehavior error:', err);
+    console.warn('[FormMitra:Background] setPanelBehavior error:', err.message);
   });
 }
 
-// Track active tab ID
-let currentActiveTabId = null;
+getSettings().catch(() => {});
 
-chrome.tabs.onActivated.addListener((activeInfo) => {
-  currentActiveTabId = activeInfo.tabId;
-  console.log('[FormMitra:Background] Active tab switched to:', currentActiveTabId);
-});
-
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete' && tab.active) {
-    currentActiveTabId = tabId;
-    console.log('[FormMitra:Background] Tab updated & ready:', tabId, tab.url);
-  }
-});
-
-// Seed default API key and model if not yet configured
-chrome.storage.local.get(['whApiKey', 'whModel'], (data) => {
-  const updates = {};
-  if (!data.whApiKey) updates.whApiKey = 'AQ.Ab8RN6LSnY7zVgbmg5QchiMeddOOfKz00FhIilIYokjgf4zyQA';
-  if (!data.whModel) updates.whModel = 'gemini-3.5-flash-lite';
-  if (Object.keys(updates).length > 0) chrome.storage.local.set(updates);
-});
-
-/* ── JSON Cleanup Helper ─────────────────────────────────────── */
-function parseModelJSON(rawText) {
-  if (!rawText || typeof rawText !== 'string') {
-    throw new Error('Empty response from model.');
-  }
-  let cleaned = rawText.trim();
-  cleaned = cleaned.replace(/^```(?:json)?\s*/i, '');
-  cleaned = cleaned.replace(/\s*```$/i, '');
-  cleaned = cleaned.trim();
-
-  const firstBrace = cleaned.indexOf('{');
-  const lastBrace = cleaned.lastIndexOf('}');
-  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-    cleaned = cleaned.substring(firstBrace, lastBrace + 1);
-  }
-  return JSON.parse(cleaned);
-}
-
-/* ── Direct Backend API: /explain-field (GROQ on backend) ──────── */
-async function explainFieldViaBackend({ field_label, context, language }) {
-  console.log(`[FormMitra:Background] Calling ${BACKEND_BASE}/explain-field for "${field_label}" [${language}]`);
+function safeReply(sendResponse, payload) {
   try {
-    const resp = await fetch(`${BACKEND_BASE}/explain-field`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        field_label: field_label || '',
-        context: context || '',
-        language: language || 'en'
-      })
-    });
-
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      throw new Error(data.error || `Backend error (HTTP ${resp.status})`);
-    }
-
-    console.log('[FormMitra:Background] /explain-field response received:', data);
-    return data;
+    sendResponse(payload);
   } catch (err) {
-    console.error('[FormMitra:Background] Backend /explain-field failed:', err.message);
-    throw err;
+    console.warn('[FormMitra:Background] sendResponse failed:', err.message);
   }
 }
 
-/* ── Direct Backend API: /check-document ─────────────────────── */
-async function checkDocumentViaBackend({ image, doc_type, filename }) {
-  console.log(`[FormMitra:Background] Calling ${BACKEND_BASE}/check-document for "${doc_type}"`);
-  try {
-    const resp = await fetch(`${BACKEND_BASE}/check-document`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        image: image || '',
-        doc_type: doc_type || 'Student ID',
-        filename: filename || 'document.jpg'
-      })
-    });
-
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      throw new Error(data.error || `Backend error (HTTP ${resp.status})`);
-    }
-
-    console.log('[FormMitra:Background] /check-document response received:', data);
-    return data;
-  } catch (err) {
-    console.error('[FormMitra:Background] Backend /check-document failed:', err.message);
-    throw err;
-  }
+function enqueueCall(fn) {
+  const next = llmQueue.then(fn, fn);
+  llmQueue = next.catch(() => {});
+  return next;
 }
 
-/* ── Direct Gemini Transcription ────────────────────────────── */
-async function transcribeAudio({ mimeType, base64 }) {
-  const store = await chrome.storage.local.get(['whApiKey', 'whModel']);
-  const apiKey = (store.whApiKey || '').trim();
-  const model = store.whModel || 'gemini-3.5-flash-lite';
+function providerLabel(p) {
+  return p === 'gemini' ? 'Gemini' : 'Groq';
+}
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const resp = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{
-        parts: [
-          { inlineData: { mimeType: mimeType || 'audio/webm', data: base64 } },
-          { text: 'Transcribe this speech exactly as spoken, in the original language and script (Kannada in Kannada script, Hindi in Devanagari, English in English). Return ONLY JSON: {"text": string, "language": "en"|"hi"|"kn"}.' }
-        ]
-      }],
-      generationConfig: { temperature: 0, responseMimeType: 'application/json' }
-    })
+function sendTabMessage(tabId, message) {
+  return new Promise((resolve) => {
+    try {
+      chrome.tabs.sendMessage(tabId, message, (response) => {
+        if (chrome.runtime.lastError) resolve({ error: chrome.runtime.lastError.message });
+        else resolve({ response });
+      });
+    } catch (err) {
+      resolve({ error: err.message });
+    }
   });
-
-  if (!resp.ok) throw new Error(`Transcription HTTP ${resp.status}`);
-  const data = await resp.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  return parseModelJSON(text);
 }
 
-/* ── Tab Helper & Relay to Content Script ─────────────────────── */
-function relayToActiveTab(payload, sendResponse) {
-  chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
-    if (!tabs || !tabs[0]) {
-      console.warn('[FormMitra:Background] No active tab found.');
-      sendResponse({ success: false, error: 'No active tab found. Please click into your scholarship portal tab.' });
-      return;
-    }
+function waitForTabComplete(tabId, timeoutMs = 6000) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      clearTimeout(timer);
+      resolve();
+    };
+    const onUpdated = (id, info) => {
+      if (id === tabId && info.status === 'complete') done();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    chrome.tabs.onUpdated.addListener(onUpdated);
+  });
+}
 
-    const tab = tabs[0];
-    const tabId = tab.id;
-    currentActiveTabId = tabId;
-
-    if (tab.url && /^(chrome|chrome-extension|edge|about):/i.test(tab.url)) {
-      sendResponse({ success: false, error: 'Cannot run on browser internal pages. Open your scholarship portal tab.' });
-      return;
-    }
-
-    console.log(`[FormMitra:Background] Relaying action "${payload?.action}" to tab ${tabId} (${tab.url})`);
-
-    chrome.tabs.sendMessage(tabId, payload, (response) => {
-      if (!chrome.runtime.lastError && response) {
-        console.log(`[FormMitra:Background] Content script responded for "${payload?.action}":`, response);
-        sendResponse(response);
-        return;
+async function waitAfterClick(tabId) {
+  let sawLoading = false;
+  await new Promise((resolve) => {
+    const onUpd = (id, info) => {
+      if (id === tabId && info.status === 'loading') {
+        sawLoading = true;
+        chrome.tabs.onUpdated.removeListener(onUpd);
+        resolve();
       }
-
-      // If content script was not yet injected into this tab, inject now
-      console.log(`[FormMitra:Background] Injecting content.js into tab ${tabId}...`);
-      chrome.scripting.executeScript(
-        { target: { tabId }, files: ['content.js'] },
-        () => {
-          if (chrome.runtime.lastError) {
-            console.error('[FormMitra:Background] Injection failed:', chrome.runtime.lastError.message);
-            sendResponse({ success: false, error: 'Cannot access this page: ' + chrome.runtime.lastError.message });
-            return;
-          }
-
-          setTimeout(() => {
-            chrome.tabs.sendMessage(tabId, payload, (retryResp) => {
-              if (!chrome.runtime.lastError && retryResp) {
-                console.log(`[FormMitra:Background] Post-injection content script response:`, retryResp);
-                sendResponse(retryResp);
-              } else {
-                console.warn('[FormMitra:Background] Page still did not respond.');
-                sendResponse({ success: false, error: 'Page did not respond. Please refresh the page.' });
-              }
-            });
-          }, 120);
-        }
-      );
-    });
+    };
+    chrome.tabs.onUpdated.addListener(onUpd);
+    setTimeout(() => { chrome.tabs.onUpdated.removeListener(onUpd); resolve(); }, 400);
   });
+
+  if (sawLoading) {
+    await waitForTabComplete(tabId, 5600);
+    await new Promise((r) => setTimeout(r, 250));
+  } else {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (tab && tab.status === 'loading') await waitForTabComplete(tabId, 5600);
+    await new Promise((r) => setTimeout(r, 250));
+  }
 }
 
-/* ── Message Listener ────────────────────────────────────────── */
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (!message) return false;
-
-  console.log('[FormMitra:Background] Received message:', message.action, 'target:', message.target);
-
-  // 1. Backend /explain-field request
-  if (message.action === 'EXPLAIN_FIELD') {
-    explainFieldViaBackend(message.payload || {})
-      .then((data) => sendResponse({ success: true, data }))
-      .catch((err) => sendResponse({ success: false, error: err.message }));
+async function ensureContentReady(tabId) {
+  const ping = await sendTabMessage(tabId, { action: 'PING' });
+  if (ping.response && ping.response.ok) return true;
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['content-helpers.js', 'content.js'] });
+    await new Promise((r) => setTimeout(r, 60));
     return true;
-  }
-
-  // 2. Backend /check-document request
-  if (message.action === 'CHECK_DOCUMENT') {
-    checkDocumentViaBackend(message.payload || {})
-      .then((data) => sendResponse({ success: true, data }))
-      .catch((err) => sendResponse({ success: false, error: err.message }));
-    return true;
-  }
-
-  // 3. Audio transcription
-  if (message.action === 'TRANSCRIBE_AUDIO') {
-    transcribeAudio(message.payload || {})
-      .then((data) => sendResponse({ success: true, data }))
-      .catch((err) => sendResponse({ success: false, error: err.message }));
-    return true;
-  }
-
-  // 4. Notification from content script when user clicks on an injected "Ask AI" button on page
-  if (message.action === 'PAGE_ASK_AI_CLICKED') {
-    console.log('[FormMitra:Background] User clicked Ask AI button on web page for:', message.fieldLabel);
-    // Forward to Side Panel
-    chrome.runtime.sendMessage({
-      target: 'sidepanel',
-      action: 'TRIGGER_ASK_AI',
-      fieldLabel: message.fieldLabel,
-      context: message.context
-    }).catch(() => {
-      // Side panel might be closed or listening
-    });
-    sendResponse({ success: true });
+  } catch (_) {
     return false;
   }
+}
 
-  // 5. Relay to Content Script on Active Tab
-  if (message.target === 'content' || message.target === 'background') {
-    const payload = message.payload || message;
-    relayToActiveTab(payload, sendResponse);
+async function handleTabAction(message) {
+  const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => []);
+  const tab = (tabs && tabs[0]) || null;
+
+  if (!tab || tab.id == null || tab.id < 0) return { ok: false, restricted: true, error: "I can't read this browser page" };
+  const tabUrl = tab.url || tab.pendingUrl || '';
+  if (!tabUrl || RESTRICTED_URL_RX.test(tabUrl)) return { ok: false, restricted: true, error: "I can't read this browser page" };
+  if (message.action === 'SNAPSHOT' && tab.status === 'loading') await waitForTabComplete(tab.id, 3000);
+  if (!(await ensureContentReady(tab.id))) return { ok: false, restricted: true, error: "I can't read this browser page" };
+
+  let res = await sendTabMessage(tab.id, message);
+  if (!res.response && message.action === 'CLICK') {
+    await waitAfterClick(tab.id);
+    return { success: true, ok: true, navigated: true };
+  }
+
+  if (!res.response) {
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content-helpers.js', 'content.js'] });
+      await new Promise((r) => setTimeout(r, 60));
+      res = await sendTabMessage(tab.id, message);
+    } catch (_) {
+      return { ok: false, restricted: true, error: "I can't read this browser page" };
+    }
+  }
+
+  if (!res.response) return { ok: false, error: res.error || 'Page did not respond. Please refresh and try again.' };
+  if (message.action === 'CLICK' && (res.response.success || res.response.ok)) await waitAfterClick(tab.id);
+  else if (message.action === 'TYPE' && (res.response.success || res.response.ok)) await new Promise((r) => setTimeout(r, 450));
+  return res.response;
+}
+
+function buildProviderOrder(settings, taskId, autoDefault = 'gemini') {
+  const configured = [];
+  const primary = settings.whProvider === 'auto' ? autoDefault : settings.whProvider;
+  const secondary = primary === 'gemini' ? 'groq' : 'gemini';
+  const keyFor = (p) => (p === 'gemini' ? settings.whGeminiKey : settings.whGroqKey);
+  const modelFor = (p) => (p === 'gemini' ? settings.whGeminiModel : settings.whGroqModel);
+
+  const affinity = taskId && autoDefault === 'gemini' ? taskProviderAffinity.get(taskId) : null;
+  if (affinity && keyFor(affinity)) configured.push(affinity);
+  [primary, secondary].forEach((p) => {
+    if (keyFor(p) && !configured.includes(p)) configured.push(p);
+  });
+
+  if (settings.whProvider === 'auto' && configured.length > 1) {
+    const now = Date.now();
+    configured.sort((a, b) => (cooldownUntil[a] > now ? 1 : 0) - (cooldownUntil[b] > now ? 1 : 0));
+  }
+  return configured.map((p) => ({ provider: p, apiKey: keyFor(p), model: modelFor(p) }));
+}
+
+async function callWithRetry(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof ProviderError && err.status >= 500 && err.status < 600) return fn();
+    throw err;
+  }
+}
+
+async function runQueuedProviderCall({ invoke, taskId, autoDefault = 'gemini', recordAffinity = true }) {
+  const settings = await getSettings();
+  const candidates = buildProviderOrder(settings, taskId, autoDefault);
+  if (candidates.length === 0) {
+    return { ok: false, code: 'NO_KEY', summary: 'Add an API key in Settings.', error: 'No Gemini or Groq API key configured.' };
+  }
+
+  const errors = [];
+  let lastSummary = 'Could not reach an AI provider.';
+
+  for (const entry of candidates) {
+    const now = Date.now();
+    if (cooldownUntil[entry.provider] > now) {
+      const secs = Math.ceil((cooldownUntil[entry.provider] - now) / 1000);
+      errors.push(`${providerLabel(entry.provider)}: Rate limit cooldown (${secs}s remaining)`);
+      lastSummary = `${providerLabel(entry.provider)} is temporarily rate-limited.`;
+      continue;
+    }
+    try {
+      const res = await callWithRetry(() => invoke(entry));
+      if (recordAffinity && taskId) taskProviderAffinity.set(taskId, entry.provider);
+      return res;
+    } catch (err) {
+      if (err instanceof ProviderError) {
+        if (err.status === 429) cooldownUntil[entry.provider] = Date.now() + (err.retryAfterMs || 30000);
+        lastSummary = `${providerLabel(entry.provider)}: ${err.summary}.`;
+        errors.push(`${providerLabel(entry.provider)}: ${err.message}`);
+      } else {
+        lastSummary = `${providerLabel(entry.provider)} request failed.`;
+        errors.push(`${providerLabel(entry.provider)}: ${err.message || 'Unknown error'}`);
+      }
+    }
+  }
+
+  return { ok: false, summary: candidates.length > 1 ? 'Both AI providers failed.' : lastSummary, error: errors.join(' | ') };
+}
+
+async function handleOpenUrl(rawUrl) {
+  let safeUrl = null;
+  try {
+    const parsed = new URL(String(rawUrl || '').trim());
+    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') safeUrl = parsed.href;
+  } catch (_) {}
+  if (!safeUrl) return { ok: false, success: false, error: 'Only http:// and https:// URLs are allowed.' };
+
+  const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => []);
+  const tab = (tabs && tabs[0]) || null;
+  if (!tab || tab.id == null || tab.id < 0) return { ok: false, success: false, error: 'No active tab found.' };
+
+  try {
+    const donePromise = waitForTabComplete(tab.id, 8000);
+    await chrome.tabs.update(tab.id, { url: safeUrl });
+    await donePromise;
+    await new Promise((r) => setTimeout(r, 200));
+    return { ok: true, success: true, url: safeUrl };
+  } catch (err) {
+    return { ok: false, success: false, error: err.message || 'Could not open URL.' };
+  }
+}
+
+async function handleTestProvider({ provider, apiKey, model }) {
+  const settings = await getSettings();
+  const rawKey = typeof apiKey === 'string' ? apiKey.trim() : (provider === 'gemini' ? settings.whGeminiKey : settings.whGroqKey);
+  const check = validateKeyForProvider(provider, rawKey);
+  if (!check.ok) return { ok: false, summary: check.error, error: check.error };
+  if (!check.key) return { ok: false, summary: 'Please enter an API key first.', error: 'Missing API key.' };
+
+  const selectedModel = model || (provider === 'gemini' ? settings.whGeminiModel : settings.whGroqModel);
+  try {
+    await callProvider({ provider, apiKey: check.key, model: selectedModel, systemPrompt: 'Respond with JSON: {"ok":true}', messages: [{ role: 'user', content: 'Ping' }] });
+    return { ok: true, provider, model: selectedModel };
+  } catch (err) {
+    const summary = err instanceof ProviderError ? `${providerLabel(provider)}: ${err.summary}` : `${providerLabel(provider)} test failed`;
+    return { ok: false, summary, error: err.message };
+  }
+}
+
+async function handleListModels({ provider, apiKey }) {
+  const settings = await getSettings();
+  const rawKey = typeof apiKey === 'string' ? apiKey.trim() : (provider === 'gemini' ? settings.whGeminiKey : settings.whGroqKey);
+  const check = validateKeyForProvider(provider, rawKey);
+  if (!check.ok) return { ok: false, summary: check.error, error: check.error };
+  if (!check.key) return { ok: false, summary: 'No API key saved for this provider.', error: 'Missing API key.' };
+
+  try {
+    return { ok: true, provider, models: await listProviderModels(provider, check.key) };
+  } catch (err) {
+    const summary = err instanceof ProviderError ? `${providerLabel(provider)}: ${err.summary}` : 'Could not fetch model list';
+    return { ok: false, summary, error: err.message };
+  }
+}
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (!message || !message.action) return false;
+  if (message.action === 'TRANSLATE_DIRTY') return false;
+
+  if (TAB_ACTIONS.has(message.action)) {
+    handleTabAction(message).then((r) => safeReply(sendResponse, r)).catch((e) => safeReply(sendResponse, { ok: false, error: e.message }));
     return true;
   }
 
+  if (message.action === 'LLM_CALL') {
+    enqueueCall(() => runQueuedProviderCall({
+      taskId: message.taskId,
+      autoDefault: 'gemini',
+      invoke: (entry) => callProvider({ ...entry, systemPrompt: message.systemPrompt, messages: message.messages })
+    })).then((r) => safeReply(sendResponse, r)).catch((e) => safeReply(sendResponse, { ok: false, summary: 'Request failed.', error: e.message }));
+    return true;
+  }
+
+  if (message.action === 'TRANSCRIBE') {
+    enqueueCall(() => runQueuedProviderCall({
+      taskId: message.taskId,
+      autoDefault: 'groq',
+      recordAffinity: false,
+      invoke: (entry) => transcribeAudio({ ...entry, base64: message.base64, mimeType: message.mimeType })
+    })).then((r) => safeReply(sendResponse, r)).catch((e) => safeReply(sendResponse, { ok: false, summary: 'Transcription failed.', error: e.message }));
+    return true;
+  }
+
+  if (message.action === 'OPEN_URL') {
+    handleOpenUrl(message.url).then((r) => safeReply(sendResponse, r)).catch((e) => safeReply(sendResponse, { ok: false, success: false, error: e.message }));
+    return true;
+  }
+
+  if (message.action === 'TEST_PROVIDER') {
+    handleTestProvider(message).then((r) => safeReply(sendResponse, r)).catch((e) => safeReply(sendResponse, { ok: false, summary: 'Test failed.', error: e.message }));
+    return true;
+  }
+
+  if (message.action === 'LIST_MODELS') {
+    handleListModels(message).then((r) => safeReply(sendResponse, r)).catch((e) => safeReply(sendResponse, { ok: false, summary: 'Failed to list models.', error: e.message }));
+    return true;
+  }
+
+  safeReply(sendResponse, { ok: false, error: `Unknown action: ${message.action}` });
   return false;
 });
