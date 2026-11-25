@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Allow Microphone — FormMitra</title>
+  <style>
+    :root {
+      --accent: #0B6E6E;
+      --accent-hover: #085656;
+      --bg: #F6F7F8;
+      --surface: #FFFFFF;
+      --border: #DCE0E5;
+      --text: #14181C;
+      --muted: #5C6670;
+      --ok-bg: #ECFDF5;
+      --ok-text: #065F46;
+      --err-bg: #FEF2F2;
+      --err-text: #991B1B;
+      --radius: 8px;
+      --font: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans Devanagari', 'Noto Sans Kannada', 'Nirmala UI', 'Tunga', sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --accent: #1B9A9A;
+        --accent-hover: #147E7E;
+        --bg: #111417;
+        --surface: #1A1F24;
+        --border: #2C333B;
+        --text: #EEF1F4;
+        --muted: #9BA6B2;
+        --ok-bg: #103224;
+        --ok-text: #6EE7B7;
+        --err-bg: #2C1515;
+        --err-text: #FCA5A5;
+      }
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font);
+      font-size: 14px;
+      line-height: 1.5;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      max-width: 440px;
+      width: 100%;
+      padding: 32px 24px;
+      text-align: center;
+    }
+    h1 { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
+    .desc { font-size: 13px; color: var(--muted); margin-bottom: 24px; }
+    .btn {
+      font-family: var(--font);
+      font-size: 14px;
+      font-weight: 500;
+      padding: 10px 20px;
+      background: var(--accent);
+      color: #FFFFFF;
+      border: none;
+      border-radius: var(--radius);
+      cursor: pointer;
+    }
+    .btn:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .status-line { margin-top: 16px; font-size: 13px; min-height: 20px; border-radius: var(--radius); padding: 8px 12px; }
+    .status-line:empty { padding: 0; }
+    .status-line.success { background: var(--ok-bg); color: var(--ok-text); }
+    .status-line.error { background: var(--err-bg); color: var(--err-text); }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>Allow Microphone</h1>
+    <p class="desc">FormMitra uses your microphone for voice input in English, Hindi, and Kannada. Your voice is transcribed only when you press the mic button.</p>
+    <button id="allow-mic-btn" type="button" class="btn">Allow microphone</button>
+    <div id="status-line" class="status-line" aria-live="polite"></div>
+  </main>
+  <script src="permission.js"></script>
+</body>
+</html>
