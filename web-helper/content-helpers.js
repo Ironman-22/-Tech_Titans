@@ -318,12 +318,83 @@
     return { ok: true };
   }
 
+  /* ── Helper Mode Spotlight (zero layout shift, outside body text) ─ */
+  let spotlightTarget = null;
+  let spotlightBadge = null;
+  let spotlightReposition = null;
+
+  function clearSpotlight() {
+    if (spotlightReposition) {
+      window.removeEventListener('scroll', spotlightReposition, true);
+      window.removeEventListener('resize', spotlightReposition);
+      spotlightReposition = null;
+    }
+    if (spotlightBadge && spotlightBadge.parentNode) spotlightBadge.remove();
+    spotlightBadge = null;
+    if (spotlightTarget) {
+      delete spotlightTarget.dataset.fmSpotlight;
+      spotlightTarget.style.outline = spotlightTarget.dataset.fmPrevOutline || '';
+      spotlightTarget.style.outlineOffset = spotlightTarget.dataset.fmPrevOutlineOffset || '';
+      delete spotlightTarget.dataset.fmPrevOutline;
+      delete spotlightTarget.dataset.fmPrevOutlineOffset;
+      spotlightTarget = null;
+    }
+    return { ok: true };
+  }
+
+  function spotlightElement(id, stepNum, findByIdFn) {
+    clearSpotlight();
+    const el = findByIdFn(id);
+    if (!el || !isVisible(el)) return { ok: false, error: 'Element not visible on page.' };
+
+    el.scrollIntoView({ block: 'center' });
+    el.dataset.fmSpotlight = '1';
+    el.dataset.fmPrevOutline = el.style.outline || '';
+    el.dataset.fmPrevOutlineOffset = el.style.outlineOffset || '';
+    el.style.outline = '3px solid #0B6E6E';
+    el.style.outlineOffset = '2px';
+    spotlightTarget = el;
+
+    const badge = document.createElement('div');
+    badge.dataset.fmSpotlightBadge = '1';
+    badge.textContent = String(stepNum || '1');
+    Object.assign(badge.style, {
+      position: 'fixed',
+      zIndex: '2147483647',
+      pointerEvents: 'none',
+      background: '#0B6E6E',
+      color: '#FFFFFF',
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: '11px',
+      fontWeight: '700',
+      lineHeight: '1',
+      padding: '3px 6px',
+      borderRadius: '999px',
+      boxShadow: '0 1px 4px rgba(0,0,0,0.28)'
+    });
+    const positionBadge = () => {
+      if (!el.isConnected) { clearSpotlight(); return; }
+      const r = el.getBoundingClientRect();
+      badge.style.top = `${Math.max(4, Math.round(r.top - 10))}px`;
+      badge.style.left = `${Math.max(4, Math.min(window.innerWidth - 26, Math.round(r.right - 8)))}px`;
+    };
+    document.documentElement.appendChild(badge);
+    spotlightBadge = badge;
+    positionBadge();
+    spotlightReposition = positionBadge;
+    window.addEventListener('scroll', positionBadge, { capture: true, passive: true });
+    window.addEventListener('resize', positionBadge, { passive: true });
+    return { ok: true };
+  }
+
   window.__formMitraHelpers = {
     collectTranslateBatch,
     applyTranslations,
     restoreTranslations,
     fillFields,
     insertFocusedValue,
-    clearFormHighlights
+    clearFormHighlights,
+    spotlightElement,
+    clearSpotlight
   };
 })();

@@ -1,6 +1,6 @@
 // FormMitra — Form Field Mapping & Review Resolution (values and sensitive items stay local)
 
-import { isSensitiveLabel } from './storage.js';
+import { isSensitiveLabel, getSavedDetails } from './storage.js';
 
 export function buildFormFillPrompt(formFields, nonSensitiveLabels) {
   const safeFields = (formFields || []).map((f) => ({
@@ -98,4 +98,41 @@ export function resolveFormFillPlan(formFields, savedDetails, aiMappings) {
   }
 
   return rows;
+}
+
+export async function runFormFillFlow({ inputText, state, dom, sendAction, refreshSnapshot, onUnreadable, onReply, onError, onCard }) {
+  await refreshSnapshot(false);
+  if (!state.snapshot || state.restricted) { onUnreadable(); return; }
+  if (!state.hasKey) {
+    onError('Add an API key in Settings.', 'Neither Gemini nor Groq API key is configured.');
+    return;
+  }
+  const fields = state.snapshot?.formFields || [];
+  if (fields.length === 0) { onReply('No visible form fields were found on this page.', null); return; }
+
+  const details = await getSavedDetails();
+  const nonSensitiveLabels = details.filter((d) => !d.sensitive).map((d) => d.label);
+  if (nonSensitiveLabels.length === 0 && !fields.some((f) => f.type === 'password')) {
+    onReply('Add non-sensitive details in the Details tab first, or use Insert for sensitive items.', null);
+    return;
+  }
+
+  const pending = document.createElement('div');
+  pending.className = 'msg msg-pending';
+  pending.textContent = 'Matching form fields...';
+  dom.chatMessages.appendChild(pending);
+  dom.emptyState.classList.add('hidden');
+  dom.chatMessages.parentElement.scrollTop = dom.chatMessages.parentElement.scrollHeight;
+
+  let resp = { ok: true, data: { mappings: [] }, provider: null };
+  if (nonSensitiveLabels.length > 0) {
+    const { systemPrompt, userPrompt } = buildFormFillPrompt(fields, nonSensitiveLabels);
+    resp = await sendAction({ action: 'LLM_CALL', systemPrompt, messages: [{ role: 'user', content: userPrompt }], taskId: state.taskId });
+  }
+  pending.remove();
+
+  if (!resp.ok) { onError(resp.summary || 'Could not match form fields.', resp.error || ''); return; }
+  const rows = resolveFormFillPlan(fields, details, resp.data?.mappings);
+  if (rows.length === 0) { onReply('None of your saved details matched the fields on this form.', resp.provider); return; }
+  onCard(rows, resp.provider);
 }

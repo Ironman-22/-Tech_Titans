@@ -31,6 +31,8 @@
           <option value="kn">ಕನ್ನಡ</option>
         </select>
 
+        <button id="btn-helper" type="button" class="btn-helper" aria-pressed="false" title="Toggle Helper Mode">Helper</button>
+
         <button id="btn-refresh" type="button" class="icon-btn" aria-label="Refresh page snapshot" title="Refresh page">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <polyline points="23 4 23 10 17 10"/>
@@ -78,6 +80,13 @@
 
   <section id="tab-chat" class="tab-pane active">
     <main class="chat-area">
+      <div id="helper-panel" class="helper-panel hidden">
+        <div id="helper-goal" class="helper-goal">Helper Mode</div>
+        <ol id="helper-steps" class="helper-steps"></ol>
+        <div id="helper-explain" class="helper-explain"></div>
+        <div id="helper-actions" class="helper-actions"></div>
+      </div>
+
       <div id="empty-state" class="empty-state">
         <p class="empty-prompt">Ask a question, find text, search, or fill forms.</p>
         <div class="chips-row">

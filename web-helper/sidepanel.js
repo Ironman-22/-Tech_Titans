@@ -1,18 +1,20 @@
 // FormMitra — Side Panel Controller (Chat, Agent, Whole-Page Translation, Saved Details, Form Fill)
 
-import { getSettings, saveSettingsPatch, getSavedDetails } from './lib/storage.js';
+import { getSettings, saveSettingsPatch } from './lib/storage.js';
 import { classifyInput, isUnreadableSnapshot, normalizeDirectUrlOrQuery, runAgentLoop } from './lib/agent.js';
 import { appendUserMessage, appendAssistantMessage, appendFindCard, appendErrorBubble, promptActionApproval, appendFormFillCard, appendUnreadablePageCard, appendStepLine } from './lib/chat-ui.js';
 import { runViewportTranslation } from './lib/translate.js';
-import { buildFormFillPrompt, resolveFormFillPlan } from './lib/form-fill.js';
+import { runFormFillFlow } from './lib/form-fill.js';
 import { mountSavedDetailsUI } from './lib/details-ui.js';
 import { createVoiceController } from './lib/voice.js';
+import { isHelperGoal, createHelperController } from './sidepanel/helper.js';
 
 const $ = (id) => document.getElementById(id);
 
 const dom = {
   providerSelect: $('provider-select'),
   langSelect: $('lang-select'),
+  btnHelper: $('btn-helper'),
   btnRefresh: $('btn-refresh'),
   btnSettings: $('btn-settings'),
   pageTitle: $('page-title'),
@@ -44,7 +46,12 @@ const dom = {
   btnStop: $('btn-stop'),
   btnSend: $('btn-send'),
   detailsStatus: $('details-status'),
-  detailsContainer: $('details-container')
+  detailsContainer: $('details-container'),
+  helperPanel: $('helper-panel'),
+  helperGoal: $('helper-goal'),
+  helperSteps: $('helper-steps'),
+  helperExplain: $('helper-explain'),
+  helperActions: $('helper-actions')
 };
 
 const state = {
@@ -62,7 +69,8 @@ const state = {
   translatedCount: 0,
   unreadableInput: null,
   detailsUi: null,
-  voice: null
+  voice: null,
+  helper: null
 };
 
 function createTaskId() {
@@ -107,6 +115,7 @@ function setRunning(flag) {
 }
 
 function stopCurrentTask() {
+  if (state.helper) state.helper.stop();
   if (!state.abortCtl) return;
   state.abortCtl.aborted = true;
   sendAction({ action: 'CANCEL_TASK', taskId: state.taskId });
@@ -213,6 +222,8 @@ async function refreshSnapshot(clearChat = true) {
     updateEmptyState();
     await sendAction({ action: 'FIND_CLEAR' });
     await sendAction({ action: 'HIGHLIGHT_CLEAR' });
+    await sendAction({ action: 'SPOTLIGHT_CLEAR' });
+    if (state.helper) state.helper.clear();
     if (state.translationActive || state.translatedCount > 0) await restoreOriginalPage();
   }
 
@@ -238,53 +249,13 @@ async function refreshSnapshot(clearChat = true) {
 }
 
 async function handleFormFill(inputText = 'Fill this form') {
-  await refreshSnapshot(false);
-  if (isUnreadableSnapshot(state.snapshot, state.restricted)) { showUnreadableCard(); return; }
-  if (!state.hasKey) {
-    appendErrorBubble(dom.chatMessages, dom.emptyState, 'Add an API key in Settings.', 'Neither Gemini nor Groq API key is configured.', () => handleUserSubmit(inputText, true));
-    return;
-  }
-  const fields = state.snapshot?.formFields || [];
-  if (fields.length === 0) {
-    appendAssistantMessage(dom.chatMessages, dom.emptyState, 'No visible form fields were found on this page.', null);
-    return;
-  }
-
-  const details = await getSavedDetails();
-  const nonSensitiveLabels = details.filter((d) => !d.sensitive).map((d) => d.label);
-  if (nonSensitiveLabels.length === 0 && !fields.some((f) => f.type === 'password')) {
-    appendAssistantMessage(dom.chatMessages, dom.emptyState, 'Add non-sensitive details in the Details tab first, or use Insert for sensitive items.', null);
-    return;
-  }
-
-  const pending = document.createElement('div');
-  pending.className = 'msg msg-pending';
-  pending.textContent = 'Matching form fields...';
-  dom.chatMessages.appendChild(pending);
-  updateEmptyState();
-  scrollToBottom();
-
-  let resp = { ok: true, data: { mappings: [] }, provider: null };
-  if (nonSensitiveLabels.length > 0) {
-    const { systemPrompt, userPrompt } = buildFormFillPrompt(fields, nonSensitiveLabels);
-    resp = await sendAction({ action: 'LLM_CALL', systemPrompt, messages: [{ role: 'user', content: userPrompt }], taskId: state.taskId });
-  }
-  pending.remove();
-
-  if (!resp.ok) {
-    appendErrorBubble(dom.chatMessages, dom.emptyState, resp.summary || 'Could not match form fields.', resp.error || '', () => handleFormFill(inputText));
-    return;
-  }
-
-  const rows = resolveFormFillPlan(fields, details, resp.data?.mappings);
-  if (rows.length === 0) {
-    appendAssistantMessage(dom.chatMessages, dom.emptyState, 'None of your saved details matched the fields on this form.', resp.provider);
-    return;
-  }
-
-  appendFormFillCard(dom.chatMessages, dom.emptyState, rows, resp.provider, (selectedEntries) =>
-    sendAction({ action: 'FILL', entries: selectedEntries })
-  );
+  await runFormFillFlow({
+    inputText, state, dom, sendAction, refreshSnapshot,
+    onUnreadable: showUnreadableCard,
+    onReply: (txt, prov) => appendAssistantMessage(dom.chatMessages, dom.emptyState, txt, prov),
+    onError: (sum, raw) => appendErrorBubble(dom.chatMessages, dom.emptyState, sum, raw, () => handleFormFill(inputText)),
+    onCard: (rows, prov) => appendFormFillCard(dom.chatMessages, dom.emptyState, rows, prov, (entries) => sendAction({ action: 'FILL', entries }))
+  });
 }
 
 async function handleUserSubmit(rawText, isRetry = false) {
@@ -298,17 +269,26 @@ async function handleUserSubmit(rawText, isRetry = false) {
     autoResizeInput();
   }
 
-  if (/^(fill(\s+this|\s+the)?\s+form|autofill)\b/i.test(input)) {
-    await handleFormFill(input);
-    return;
-  }
-
   const route = classifyInput(input);
   if (route.mode === 'find') {
     const res = await sendAction({ action: 'FIND', query: route.query });
     if (res.restricted) showUnreadableCard();
     else if (!res.ok) appendErrorBubble(dom.chatMessages, dom.emptyState, res.error || 'Could not search this page.', '', () => handleUserSubmit(input, true));
     else appendFindCard(dom.chatMessages, dom.emptyState, route.query, res.count || 0, res.index || 0, sendAction);
+    return;
+  }
+
+  if (state.helper && state.helper.isEnabled() && isHelperGoal(input)) {
+    const ctl = { aborted: false, onAbort: null };
+    state.abortCtl = ctl;
+    setRunning(true);
+    try { await state.helper.startPlan(input); }
+    finally { state.abortCtl = null; setRunning(false); }
+    return;
+  }
+
+  if (/^(fill(\s+this|\s+the)?\s+form|autofill)\b/i.test(input)) {
+    await handleFormFill(input);
     return;
   }
 
@@ -373,9 +353,16 @@ function wireEvents() {
   dom.chipFill.addEventListener('click', () => handleUserSubmit('Fill this form'));
 
   dom.btnStop.addEventListener('click', stopCurrentTask);
+  dom.btnHelper.addEventListener('click', () => {
+    const next = !state.helper.isEnabled();
+    state.helper.setEnabled(next);
+    saveSettingsPatch({ whHelper: next });
+  });
   dom.btnMic.addEventListener('click', () => { if (state.voice) state.voice.toggle(); });
-  window.addEventListener('pagehide', () => { if (state.voice) state.voice.cleanup(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.running) { e.preventDefault(); stopCurrentTask(); } });
+  window.addEventListener('pagehide', () => { if (state.voice) state.voice.cleanup(); if (state.helper) state.helper.stop(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && (state.running || state.helper?.isActive())) { e.preventDefault(); stopCurrentTask(); }
+  });
 
   dom.chatInput.addEventListener('input', autoResizeInput);
   dom.chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleUserSubmit(dom.chatInput.value); } });
@@ -423,10 +410,22 @@ async function init() {
     }
   });
 
+  state.helper = createHelperController({
+    dom, state, sendAction, refreshSnapshot,
+    onReply: (txt, prov) => appendAssistantMessage(dom.chatMessages, dom.emptyState, txt, prov),
+    onError: (sum, raw, retryFn) => appendErrorBubble(dom.chatMessages, dom.emptyState, sum, raw, retryFn),
+    onNoKey: () => dom.noKeyBanner.classList.remove('hidden'),
+    onUnreadable: showUnreadableCard,
+    onAskApproval: (promptText, c) => promptActionApproval(dom.chatMessages, dom.emptyState, promptText, c),
+    onCloseToggle: (flag) => { state.helper.setEnabled(flag); return saveSettingsPatch({ whHelper: flag }); },
+    onSetRunning: setRunning
+  });
+
   const settings = await getSettings();
   dom.providerSelect.value = settings.whProvider;
   dom.langSelect.value = settings.whLang;
   state.lang = settings.whLang;
+  state.helper.setEnabled(settings.whHelper);
   dom.firstRunNotice.classList.toggle('hidden', settings.whNoticeAck);
   updateKeyBanner(settings);
   await refreshSnapshot(false);

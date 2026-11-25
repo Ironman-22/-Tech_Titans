@@ -134,12 +134,16 @@
       const options = el.tagName === 'SELECT'
         ? Array.from(el.options).slice(0, 30).map((o) => collapseWs(o.textContent || o.value)).filter(Boolean)
         : [];
+      const hasValue = isEditable
+        ? Boolean(collapseWs(el.innerText || el.textContent))
+        : (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio') ? el.checked : Boolean(String(el.value || '').trim()));
       fields.push({
         id: assignStableId(el),
         label: label || el.name || type,
         type,
         options,
-        required: Boolean(el.required || el.getAttribute('aria-required') === 'true')
+        required: Boolean(el.required || el.getAttribute('aria-required') === 'true'),
+        hasValue
       });
     });
     return { formFields: fields, hasSearchBox };
@@ -148,6 +152,8 @@
   function takeSnapshot() {
     const visibleText = collapseWs(document.body?.innerText || '').slice(0, 3000);
     const { formFields, hasSearchBox } = collectFormFields();
+    const searchEl = findSearchTarget();
+    const searchValue = searchEl ? collapseWs(searchEl.isContentEditable ? (searchEl.innerText || searchEl.textContent) : searchEl.value) : '';
     return {
       title: collapseWs(document.title),
       url: window.location.href,
@@ -156,7 +162,8 @@
       visibleText,
       interactive: collectInteractive(),
       formFields,
-      hasSearchBox
+      hasSearchBox,
+      searchValue
     };
   }
 
@@ -377,6 +384,8 @@
       case 'FILL': sendResponse(h ? h.fillFields(msg.entries, findByStableId, isSensitiveField) : { ok: false }); return false;
       case 'INSERT_VALUE': sendResponse(h ? h.insertFocusedValue(msg.value) : { ok: false }); return false;
       case 'HIGHLIGHT_CLEAR': sendResponse(h ? h.clearFormHighlights() : { ok: true }); return false;
+      case 'SPOTLIGHT': sendResponse(h ? h.spotlightElement(msg.id, msg.stepNum, findByStableId) : { ok: false }); return false;
+      case 'SPOTLIGHT_CLEAR': sendResponse(h ? h.clearSpotlight() : { ok: true }); return false;
       case 'TRANSLATE_DIRTY': return false;
       default: sendResponse({ ok: false, error: `Unknown action: ${msg.action}` }); return false;
     }
@@ -389,6 +398,7 @@
     if (window.__formMitraHelpers) {
       window.__formMitraHelpers.restoreTranslations();
       window.__formMitraHelpers.clearFormHighlights();
+      window.__formMitraHelpers.clearSpotlight();
     }
     try { chrome.runtime.onMessage.removeListener(onMessage); } catch (_) {}
     delete window.__formMitraLoaded;

@@ -17,6 +17,8 @@
  *   FILL              (Sidepanel -> Background -> Content) : { action: 'FILL', entries: [{ id, value, tier }] } -> { ok, success, count }
  *   INSERT_VALUE      (Sidepanel -> Background -> Content) : { action: 'INSERT_VALUE', value } -> { ok, success, error? }
  *   HIGHLIGHT_CLEAR   (Sidepanel -> Background -> Content) : { action: 'HIGHLIGHT_CLEAR' } -> { ok: true }
+ *   SPOTLIGHT         (Sidepanel -> Background -> Content) : { action: 'SPOTLIGHT', id, stepNum? } -> { ok, error? }
+ *   SPOTLIGHT_CLEAR   (Sidepanel -> Background -> Content) : { action: 'SPOTLIGHT_CLEAR' } -> { ok: true }
  *   LLM_CALL          (Sidepanel -> Background)            : { action: 'LLM_CALL', systemPrompt, messages, taskId? } -> { ok, data, provider, model } | { ok: false, error, summary, code? }
  *   TRANSCRIBE        (Sidepanel -> Background)            : { action: 'TRANSCRIBE', base64, mimeType, taskId? } -> { ok, data: { text, language }, provider } | { ok: false, error, summary, code? }
  *   OPEN_URL          (Sidepanel -> Background)            : { action: 'OPEN_URL', url } -> { ok, success, url?, error? }
@@ -31,7 +33,8 @@ import { callProvider, transcribeAudio, listProviderModels, ProviderError } from
 const RESTRICTED_URL_RX = /^(chrome|chrome-extension|edge|about|devtools|view-source):|^https?:\/\/(chromewebstore\.google\.com|chrome\.google\.com\/webstore|microsoftedge\.microsoft\.com\/addons)/i;
 const TAB_ACTIONS = new Set([
   'SNAPSHOT', 'FIND', 'FIND_NAV', 'FIND_CLEAR', 'CLICK', 'TYPE', 'SCROLL',
-  'TRANSLATE_COLLECT', 'TRANSLATE_APPLY', 'TRANSLATE_RESTORE', 'FILL', 'INSERT_VALUE', 'HIGHLIGHT_CLEAR'
+  'TRANSLATE_COLLECT', 'TRANSLATE_APPLY', 'TRANSLATE_RESTORE', 'FILL', 'INSERT_VALUE', 'HIGHLIGHT_CLEAR',
+  'SPOTLIGHT', 'SPOTLIGHT_CLEAR'
 ]);
 
 const cooldownUntil = { gemini: 0, groq: 0 };

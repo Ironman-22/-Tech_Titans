@@ -7,7 +7,8 @@ export const DEFAULTS = Object.freeze({
   whGroqModel: 'openai/gpt-oss-120b',
   whProvider: 'auto',
   whLang: 'en',
-  whNoticeAck: false
+  whNoticeAck: false,
+  whHelper: false
 });
 
 const STORAGE_KEYS = Object.keys(DEFAULTS);
@@ -91,7 +92,8 @@ export async function getSettings() {
     whGroqModel: typeof res.whGroqModel === 'string' && res.whGroqModel ? res.whGroqModel : DEFAULTS.whGroqModel,
     whProvider: ['auto', 'gemini', 'groq'].includes(res.whProvider) ? res.whProvider : DEFAULTS.whProvider,
     whLang: ['en', 'hi', 'kn'].includes(res.whLang) ? res.whLang : DEFAULTS.whLang,
-    whNoticeAck: Boolean(res.whNoticeAck)
+    whNoticeAck: Boolean(res.whNoticeAck),
+    whHelper: Boolean(res.whHelper)
   };
 }
 
@@ -109,6 +111,7 @@ export async function saveSettingsPatch(patch) {
   if (['auto', 'gemini', 'groq'].includes(patch.whProvider)) allowed.whProvider = patch.whProvider;
   if (['en', 'hi', 'kn'].includes(patch.whLang)) allowed.whLang = patch.whLang;
   if (typeof patch.whNoticeAck === 'boolean') allowed.whNoticeAck = patch.whNoticeAck;
+  if (typeof patch.whHelper === 'boolean') allowed.whHelper = patch.whHelper;
   if (Object.keys(allowed).length > 0) await storageSet(allowed);
 }
 

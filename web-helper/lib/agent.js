@@ -57,6 +57,20 @@ export function normalizeDirectUrlOrQuery(rawInput) {
   return resolveOpenUrl(null, text);
 }
 
+export function sanitizeSnapshotForAi(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return { error: "I can't read this browser page" };
+  return {
+    title: snapshot.title,
+    url: snapshot.url,
+    language: snapshot.language,
+    headings: snapshot.headings,
+    visibleText: snapshot.visibleText,
+    interactive: snapshot.interactive,
+    formFields: (snapshot.formFields || []).map(({ id, label, type, options, required }) => ({ id, label, type, options, required })),
+    hasSearchBox: Boolean(snapshot.hasSearchBox)
+  };
+}
+
 function parseNavigationIntent(rawGoal) {
   const goal = String(rawGoal || '').trim();
   if (!goal) return null;
@@ -113,13 +127,15 @@ function buildAgentSystemPrompt(langCode) {
   ].join('\n');
 }
 
+export { parseNavigationIntent };
+
 function buildStepUserPrompt({ goal, stepNotes, snapshot }) {
   const notesText = stepNotes.length > 0
     ? stepNotes.map((n, i) => `${i + 1}. ${n}`).join('\n')
     : 'None (first step)';
 
   const snapJson = snapshot
-    ? JSON.stringify(snapshot)
+    ? JSON.stringify(sanitizeSnapshotForAi(snapshot))
     : JSON.stringify({ error: "I can't read this browser page" });
 
   return [
@@ -177,14 +193,14 @@ function validateAction(rawAction, snapshot) {
   return fallback;
 }
 
-function isAutoAllowedNavClick(action) {
+export function isAutoAllowedNavClick(action) {
   if (!action || action.type !== 'click') return false;
   if (SAFE_NAV_KINDS.has(action.kind)) return true;
   if (action.kind === 'button' && SAFE_NAV_BTN_RX.test(action.text || '')) return true;
   return false;
 }
 
-function describeApproval(action) {
+export function describeApproval(action) {
   if (action.type === 'open_url') return action.query ? `I want to open: Google search for: ${action.query}` : `I want to open: ${action.url}`;
   if (action.type === 'click') return `I want to click: "${action.text}" because ${action.reason}`;
   if (action.type === 'type' && action.target === 'search') return `I want to type: "${action.text}" into the search box because ${action.reason}`;
@@ -205,7 +221,7 @@ function abortableSleep(ms, ctl) {
 
 const STUCK_MSG = "I couldn't make that work on this page. Try clicking it yourself, or ask me something else.";
 
-function raceAbort(promise, ctl) {
+export function raceAbort(promise, ctl) {
   return new Promise((resolve) => {
     if (ctl.aborted) return resolve({ aborted: true });
     let done = false;
@@ -227,7 +243,7 @@ function hashText(str) {
   return (h >>> 0).toString(16);
 }
 
-function computeFingerprint(snapshot) {
+export function computeFingerprint(snapshot) {
   if (!snapshot || typeof snapshot !== 'object') return 'none';
   const count = Array.isArray(snapshot.interactive) ? snapshot.interactive.length : 0;
   return `${snapshot.url || ''}|${snapshot.title || ''}|${hashText(String(snapshot.visibleText || '').slice(0, 1500))}|${count}`;
@@ -285,7 +301,7 @@ async function waitForSettledSnapshot({ action, preFp, ctl, refreshSnapshot, sta
   return preFp;
 }
 
-async function executeAction(action, sendAction) {
+export async function executeAction(action, sendAction) {
   if (action.type === 'open_url') return sendAction({ action: 'OPEN_URL', url: action.url });
   if (action.type === 'click') return sendAction({ action: 'CLICK', id: action.id });
   if (action.type === 'type') return sendAction({ action: 'TYPE', target: action.target, text: action.text, id: action.id });
