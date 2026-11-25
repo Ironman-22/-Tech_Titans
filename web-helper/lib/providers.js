@@ -145,21 +145,26 @@ export function callProvider({ provider, apiKey, model, systemPrompt, messages, 
   throw new ProviderError(provider, 400, 'Unknown provider', String(provider));
 }
 
-export async function transcribeAudio({ provider, apiKey, model, base64, mimeType }) {
+export async function transcribeAudio({ provider, apiKey, model, base64, mimeType, langHint = 'auto', signal }) {
   if (provider === 'groq') {
     const cleanMime = String(mimeType || 'audio/webm').split(';')[0];
+    const whisperModel = await resolveGroqWhisperModel(apiKey, signal);
     const form = new FormData();
-    form.append('file', base64ToBlob(base64, cleanMime), 'recording.webm');
-    form.append('model', 'whisper-large-v3-turbo');
+    form.append('file', base64ToBlob(base64, cleanMime), 'audio.webm');
+    form.append('model', whisperModel);
     form.append('response_format', 'verbose_json');
     form.append('temperature', '0');
+    if (langHint === 'hi' || langHint === 'kn' || langHint === 'en') form.append('language', langHint);
+    if (langHint === 'hi') form.append('prompt', 'यह हिंदी में बोला गया वाक्य है।');
+    if (langHint === 'kn') form.append('prompt', 'ಇದು ಕನ್ನಡದಲ್ಲಿ ಹೇಳಿದ ವಾಕ್ಯ.');
 
     let resp;
     try {
       resp = await fetch(`${GROQ_BASE}/audio/transcriptions`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}` },
-        body: form
+        body: form,
+        signal
       });
     } catch (netErr) {
       throw new ProviderError('groq', 0, 'Network error', netErr.message);
@@ -171,14 +176,16 @@ export async function transcribeAudio({ provider, apiKey, model, base64, mimeTyp
       ok: true,
       data: { text: String(json.text || '').trim(), language: normalizeLangCode(json.language) },
       provider: 'groq',
-      model: 'whisper-large-v3-turbo'
+      model: whisperModel
     };
   }
 
   if (provider === 'gemini') {
     const cleanMime = String(mimeType || 'audio/webm').split(';')[0];
     const url = `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`;
-    const prompt = 'Transcribe exactly as spoken in the original language and script (Kannada in Kannada script, Hindi in Devanagari). Do not translate. Return ONLY JSON {"text": string, "language": "en"|"hi"|"kn"|"other"}. If no speech, text is empty.';
+    const langNames = { en: 'English', hi: 'Hindi', kn: 'Kannada' };
+    const expectedLine = langNames[langHint] ? `The expected language is ${langNames[langHint]}. ` : '';
+    const prompt = `Transcribe this audio exactly as spoken. ${expectedLine}Write it in its native script (Hindi in Devanagari, Kannada in Kannada script). Never translate. Never transliterate into English letters. If the speaker mixes English words, keep those words in English. Return ONLY JSON {"text": string, "language": "en"|"hi"|"kn"|"other"}. If there is no speech, text is an empty string.`;
 
     let resp;
     try {
@@ -188,7 +195,8 @@ export async function transcribeAudio({ provider, apiKey, model, base64, mimeTyp
         body: JSON.stringify({
           contents: [{ role: 'user', parts: [{ text: prompt }, { inlineData: { mimeType: cleanMime, data: base64 } }] }],
           generationConfig: { responseMimeType: 'application/json', temperature: 0 }
-        })
+        }),
+        signal
       });
     } catch (netErr) {
       throw new ProviderError('gemini', 0, 'Network error', netErr.message);
@@ -211,6 +219,26 @@ export async function transcribeAudio({ provider, apiKey, model, base64, mimeTyp
   }
 
   throw new ProviderError(provider, 400, 'Unknown provider', String(provider));
+}
+
+let cachedGroqWhisperModel = null;
+
+async function resolveGroqWhisperModel(apiKey, signal) {
+  if (cachedGroqWhisperModel) return cachedGroqWhisperModel;
+  try {
+    const resp = await fetch(`${GROQ_BASE}/models`, { headers: { Authorization: `Bearer ${apiKey}` }, signal });
+    if (resp.ok) {
+      const json = await resp.json();
+      const ids = new Set((json.data || []).filter((m) => m && m.active !== false).map((m) => m.id));
+      if (ids.size > 0) {
+        cachedGroqWhisperModel = ids.has('whisper-large-v3')
+          ? 'whisper-large-v3'
+          : (ids.has('whisper-large-v3-turbo') ? 'whisper-large-v3-turbo' : 'whisper-large-v3');
+        return cachedGroqWhisperModel;
+      }
+    }
+  } catch (_) {}
+  return 'whisper-large-v3';
 }
 
 export async function listProviderModels(provider, apiKey) {

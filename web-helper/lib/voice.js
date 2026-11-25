@@ -1,9 +1,13 @@
 // FormMitra — Voice State Machine ('idle' | 'recording' | 'transcribing', MediaRecorder + Web Speech fallback)
 
 const SPEECH_LOCALE = {
-  en: 'en-US',
+  en: 'en-IN',
   hi: 'hi-IN',
   kn: 'kn-IN'
+};
+
+const AUDIO_CONSTRAINTS = {
+  audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
 };
 
 export function createVoiceController({
@@ -24,6 +28,8 @@ export function createVoiceController({
   let recognition = null;
   let activeRunId = 0;
   let recordingMime = 'audio/webm';
+  let recordingStartedAt = 0;
+  let recordedTooShort = false;
 
   function setMicUi(stateName, statusText = '') {
     voiceState = stateName;
@@ -71,7 +77,12 @@ export function createVoiceController({
     setMicUi('idle', keepStatus ? micStatus.textContent : '');
   }
 
-  function applyTranscript(text, detectedLang) {
+  function getLangHint() {
+    const val = langSelect ? langSelect.value : 'en';
+    return ['en', 'hi', 'kn'].includes(val) ? val : 'auto';
+  }
+
+  function applyTranscript(text, detectedLang, sentLangHint, wrongScript = false) {
     const clean = String(text || '').trim();
     if (!clean) {
       cleanup();
@@ -83,13 +94,16 @@ export function createVoiceController({
     onResizeInput();
     chatInput.focus();
 
-    if (['en', 'hi', 'kn'].includes(detectedLang)) {
+    if (sentLangHint === 'en' && (detectedLang === 'hi' || detectedLang === 'kn')) {
       onLanguageDetected(detectedLang);
     }
     cleanup();
+    if (wrongScript) {
+      setMicUi('idle', 'I heard this as English. Speak a little slower, or check the language in the header.');
+    }
   }
 
-  function startWebSpeechFallback(priorError) {
+  function startWebSpeechFallback(priorError, langHint) {
     const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRec) {
       const detail = priorError || 'Speech recognition is unavailable in this browser.';
@@ -100,7 +114,7 @@ export function createVoiceController({
 
     const rec = new SpeechRec();
     recognition = rec;
-    rec.lang = SPEECH_LOCALE[langSelect.value] || 'en-US';
+    rec.lang = SPEECH_LOCALE[langHint] || 'en-IN';
     rec.interimResults = false;
     rec.maxAlternatives = 1;
 
@@ -109,7 +123,7 @@ export function createVoiceController({
     rec.onresult = (e) => {
       const text = e.results?.[0]?.[0]?.transcript || '';
       recognition = null;
-      applyTranscript(text, 'other');
+      applyTranscript(text, 'other', langHint, false);
     };
 
     rec.onerror = (e) => {
@@ -140,32 +154,32 @@ export function createVoiceController({
     }
   }
 
-  function transcribeBlob(blob, mimeType, runId) {
+  function transcribeBlob(blob, mimeType, runId, langHint) {
     const reader = new FileReader();
 
     reader.onerror = () => {
       if (runId !== activeRunId) return;
       const msg = reader.error ? `${reader.error.name}: ${reader.error.message}` : 'FileReader error';
-      startWebSpeechFallback(msg);
+      startWebSpeechFallback(msg, langHint);
     };
 
     reader.onloadend = async () => {
       if (runId !== activeRunId) return;
       if (typeof reader.result !== 'string' || !reader.result.includes(',')) {
-        startWebSpeechFallback('Empty audio recording.');
+        startWebSpeechFallback('Empty audio recording.', langHint);
         return;
       }
 
       const base64 = reader.result.split(',')[1];
-      const resp = await sendAction({ action: 'TRANSCRIBE', base64, mimeType });
+      const resp = await sendAction({ action: 'TRANSCRIBE', base64, mimeType, langHint });
       if (runId !== activeRunId) return;
 
       if (resp.ok && resp.data) {
-        applyTranscript(resp.data.text, resp.data.language);
+        applyTranscript(resp.data.text, resp.data.language, langHint, Boolean(resp.data.wrongScript));
         return;
       }
 
-      startWebSpeechFallback(resp.error || resp.summary || 'Provider transcription failed.');
+      startWebSpeechFallback(resp.error || resp.summary || 'Provider transcription failed.', langHint);
     };
 
     reader.readAsDataURL(blob);
@@ -182,6 +196,7 @@ export function createVoiceController({
       return;
     }
 
+    recordedTooShort = recordingStartedAt > 0 && (Date.now() - recordingStartedAt) < 800;
     recordingMime = (mediaRecorder && mediaRecorder.mimeType) || 'audio/webm';
     setMicUi('transcribing', 'Transcribing...');
 
@@ -203,19 +218,21 @@ export function createVoiceController({
     }
 
     const runId = ++activeRunId;
+    const langHint = getLangHint();
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia(AUDIO_CONSTRAINTS);
       if (runId !== activeRunId) {
         stream.getTracks().forEach((t) => { try { t.stop(); } catch (_) {} });
         return;
       }
       audioStream = stream;
       audioChunks = [];
+      recordedTooShort = false;
 
-      const mimeOpt = typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? { mimeType: 'audio/webm;codecs=opus' }
-        : undefined;
-      const mr = mimeOpt ? new MediaRecorder(stream, mimeOpt) : new MediaRecorder(stream);
+      let mr;
+      const opusSupported = typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus');
+      const recOpts = opusSupported ? { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 64000 } : { audioBitsPerSecond: 64000 };
+      try { mr = new MediaRecorder(stream, recOpts); } catch (_) { mr = new MediaRecorder(stream); }
       mediaRecorder = mr;
       recordingMime = mr.mimeType || 'audio/webm';
 
@@ -233,9 +250,16 @@ export function createVoiceController({
         const blob = new Blob(audioChunks, { type: recordingMime });
         audioChunks = [];
         mediaRecorder = null;
-        if (runId === activeRunId) transcribeBlob(blob, recordingMime, runId);
+        if (runId !== activeRunId) return;
+        if (recordedTooShort) {
+          cleanup();
+          setMicUi('idle', 'That was too short. Tap the mic, speak, then tap again.');
+          return;
+        }
+        transcribeBlob(blob, recordingMime, runId, langHint);
       };
 
+      recordingStartedAt = Date.now();
       mr.start();
       setMicUi('recording', 'Listening... tap again to stop');
 

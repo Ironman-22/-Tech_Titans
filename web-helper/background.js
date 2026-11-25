@@ -20,7 +20,7 @@
  *   SPOTLIGHT         (Sidepanel -> Background -> Content) : { action: 'SPOTLIGHT', id, stepNum? } -> { ok, error? }
  *   SPOTLIGHT_CLEAR   (Sidepanel -> Background -> Content) : { action: 'SPOTLIGHT_CLEAR' } -> { ok: true }
  *   LLM_CALL          (Sidepanel -> Background)            : { action: 'LLM_CALL', systemPrompt, messages, taskId? } -> { ok, data, provider, model } | { ok: false, error, summary, code? }
- *   TRANSCRIBE        (Sidepanel -> Background)            : { action: 'TRANSCRIBE', base64, mimeType, taskId? } -> { ok, data: { text, language }, provider } | { ok: false, error, summary, code? }
+ *   TRANSCRIBE        (Sidepanel -> Background)            : { action: 'TRANSCRIBE', base64, mimeType, langHint?, taskId? } -> { ok, data: { text, language, wrongScript? }, provider } | { ok: false, error, summary, code? }
  *   OPEN_URL          (Sidepanel -> Background)            : { action: 'OPEN_URL', url } -> { ok, success, url?, error? }
  *   CANCEL_TASK       (Sidepanel -> Background)            : { action: 'CANCEL_TASK', taskId? } -> { ok: true }
  *   TEST_PROVIDER     (Options -> Background)              : { action: 'TEST_PROVIDER', provider, apiKey?, model? } -> { ok, provider, model } | { ok: false, error, summary }
@@ -240,6 +240,42 @@ async function runQueuedProviderCall({ invoke, taskId, autoDefault = 'gemini', r
   }
 }
 
+function hasExpectedScript(langHint, text) {
+  if (langHint === 'hi') return /[\u0900-\u097F]/.test(text);
+  if (langHint === 'kn') return /[\u0C80-\u0CFF]/.test(text);
+  return true;
+}
+
+async function handleTranscribeCall(message) {
+  const langHint = ['en', 'hi', 'kn', 'auto'].includes(message.langHint) ? message.langHint : 'auto';
+  const autoDefault = langHint === 'kn' ? 'gemini' : 'groq';
+  const first = await runQueuedProviderCall({
+    taskId: message.taskId,
+    autoDefault,
+    recordAffinity: false,
+    invoke: (entry, signal) => transcribeAudio({ ...entry, base64: message.base64, mimeType: message.mimeType, langHint, signal })
+  });
+
+  if (!first.ok || !first.data?.text || hasExpectedScript(langHint, first.data.text)) return first;
+
+  const settings = await getSettings();
+  const order = buildProviderOrder(settings, null, autoDefault);
+  const other = order.find((c) => c.provider !== first.provider && cooldownUntil[c.provider] <= Date.now());
+  if (other) {
+    try {
+      const retry = await callWithRetry(() => transcribeAudio({ ...other, base64: message.base64, mimeType: message.mimeType, langHint }));
+      if (retry.ok && retry.data?.text) {
+        if (hasExpectedScript(langHint, retry.data.text)) return retry;
+        return { ...retry, data: { ...retry.data, wrongScript: true } };
+      }
+    } catch (err) {
+      if (err instanceof ProviderError && err.status === 429) cooldownUntil[other.provider] = Date.now() + (err.retryAfterMs || 30000);
+    }
+  }
+
+  return { ...first, data: { ...first.data, wrongScript: true } };
+}
+
 async function handleOpenUrl(rawUrl) {
   let safeUrl = null;
   try {
@@ -326,12 +362,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.action === 'TRANSCRIBE') {
-    enqueueCall(() => runQueuedProviderCall({
-      taskId: message.taskId,
-      autoDefault: 'groq',
-      recordAffinity: false,
-      invoke: (entry) => transcribeAudio({ ...entry, base64: message.base64, mimeType: message.mimeType })
-    })).then((r) => safeReply(sendResponse, r)).catch((e) => safeReply(sendResponse, { ok: false, summary: 'Transcription failed.', error: e.message }));
+    enqueueCall(() => handleTranscribeCall(message))
+      .then((r) => safeReply(sendResponse, r))
+      .catch((e) => safeReply(sendResponse, { ok: false, summary: 'Transcription failed.', error: e.message }));
     return true;
   }
 
