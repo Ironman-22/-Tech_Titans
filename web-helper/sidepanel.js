@@ -1,6 +1,7 @@
 // FormMitra — Side Panel Controller (Chat, Agent, Whole-Page Translation, Saved Details, Form Fill)
 
 import { getSettings, saveSettingsPatch } from './lib/storage.js';
+import { STRINGS, t, bindI18n, clearI18n, setLang } from './lib/i18n.js';
 import { classifyInput, isUnreadableSnapshot, normalizeDirectUrlOrQuery, runAgentLoop } from './lib/agent.js';
 import { appendUserMessage, appendAssistantMessage, appendFindCard, appendErrorBubble, promptActionApproval, appendFormFillCard, appendUnreadablePageCard, appendStepLine } from './lib/chat-ui.js';
 import { runViewportTranslation } from './lib/translate.js';
@@ -81,9 +82,9 @@ function sendAction(payload) {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage(payload, (resp) => {
       if (chrome.runtime.lastError) {
-        resolve({ ok: false, summary: 'Could not reach extension service.', error: chrome.runtime.lastError.message });
+        resolve({ ok: false, summary: t('svcUnreachable'), error: chrome.runtime.lastError.message });
       } else {
-        resolve(resp || { ok: false, summary: 'No response received.', error: 'Empty response.' });
+        resolve(resp || { ok: false, summary: t('emptyResponse'), error: t('emptyResponse') });
       }
     });
   });
@@ -133,18 +134,23 @@ function switchTab(tabId) {
   dom.tabDetails.classList.toggle('active', !isChat);
 }
 
-function setTranslationControls(translating, showOrig, statusText = '') {
+function setStatusSpec(el, spec) {
+  if (spec && typeof spec === 'object' && spec.key) bindI18n(el, spec.key, spec.vars || null);
+  else { clearI18n(el); el.textContent = spec || ''; }
+}
+
+function setTranslationControls(translating, showOrig, statusSpec = '') {
   dom.btnTranslatePage.disabled = translating;
   dom.btnTranslateCancel.classList.toggle('hidden', !translating);
   dom.btnShowOriginal.classList.toggle('hidden', !showOrig);
-  dom.translateStatus.textContent = statusText;
+  setStatusSpec(dom.translateStatus, statusSpec);
 }
 
 async function runPageTranslation(isLazyTrigger = false) {
   if (state.translating) return;
   if (!state.hasKey) {
     dom.noKeyBanner.classList.remove('hidden');
-    dom.translateStatus.textContent = 'Add an API key in Settings.';
+    setStatusSpec(dom.translateStatus, { key: 'noKeyErrSummary' });
     return;
   }
 
@@ -153,34 +159,32 @@ async function runPageTranslation(isLazyTrigger = false) {
   state.translating = true;
   if (!isLazyTrigger) state.translatedCount = 0;
 
-  setTranslationControls(true, state.translatedCount > 0, isLazyTrigger ? 'Translating new content...' : 'Collecting visible text...');
+  setTranslationControls(true, state.translatedCount > 0, { key: isLazyTrigger ? 'translatingMore' : 'translatingCollect' });
 
   try {
     const res = await runViewportTranslation({
       targetLang: state.lang,
       taskId: state.taskId,
       sendAction,
-      onProgress: (txt) => { dom.translateStatus.textContent = txt; },
+      onProgress: (txt) => setStatusSpec(dom.translateStatus, txt),
       ctl
     });
 
     if (res.aborted || ctl.aborted) {
-      setTranslationControls(false, state.translatedCount > 0, 'Translation cancelled.');
+      setTranslationControls(false, state.translatedCount > 0, { key: 'translationCancelled' });
       return;
     }
 
     state.translatedCount += res.applied || 0;
     if (!res.ok) {
       state.translationActive = false;
-      setTranslationControls(false, state.translatedCount > 0, res.error || 'Translation failed.');
+      setTranslationControls(false, state.translatedCount > 0, res.error || { key: 'translationFailed' });
       return;
     }
 
     state.translationActive = true;
-    const msgParts = [`Translated (${state.translatedCount})`];
-    if (res.partialMismatch) msgParts.push('some items skipped');
-    else if (res.hasMoreOffscreen) msgParts.push('scroll for more');
-    setTranslationControls(false, state.translatedCount > 0, msgParts.join(' — '));
+    const statusKey = res.partialMismatch ? 'translatedSkipped' : (res.hasMoreOffscreen ? 'translatedScrollMore' : 'translatedCount');
+    setTranslationControls(false, state.translatedCount > 0, { key: statusKey, vars: { n: state.translatedCount } });
   } finally {
     state.translateCtl = null;
     state.translating = false;
@@ -197,7 +201,7 @@ async function restoreOriginalPage() {
 
 async function openFromCard(rawText) {
   const resolved = normalizeDirectUrlOrQuery(rawText);
-  if (!resolved || resolved.blocked) return { ok: false, error: 'Only http:// and https:// URLs are allowed.' };
+  if (!resolved || resolved.blocked) return { ok: false, error: t('onlyHttpAllowed') };
   const res = await sendAction({ action: 'OPEN_URL', url: resolved.url });
   if (res.ok) await refreshSnapshot(false);
   return res;
@@ -227,8 +231,8 @@ async function refreshSnapshot(clearChat = true) {
     if (state.translationActive || state.translatedCount > 0) await restoreOriginalPage();
   }
 
-  dom.pageTitle.textContent = 'Reading page...';
-  dom.pageChars.textContent = 'Read 0 chars';
+  bindI18n(dom.pageTitle, 'readingPage');
+  bindI18n(dom.pageChars, 'readChars', { n: 0 });
   state.restricted = false;
 
   const resp = await sendAction({ action: 'SNAPSHOT' });
@@ -236,19 +240,24 @@ async function refreshSnapshot(clearChat = true) {
     state.snapshot = resp.snapshot;
     state.restricted = false;
     state.unreadableInput = null;
-    dom.pageTitle.textContent = resp.snapshot.title || resp.snapshot.url || 'Untitled page';
-    dom.pageChars.textContent = `Read ${(resp.snapshot.visibleText || '').length} chars`;
+    if (resp.snapshot.title || resp.snapshot.url) {
+      clearI18n(dom.pageTitle);
+      dom.pageTitle.textContent = resp.snapshot.title || resp.snapshot.url;
+    } else {
+      bindI18n(dom.pageTitle, 'untitledPage');
+    }
+    bindI18n(dom.pageChars, 'readChars', { n: (resp.snapshot.visibleText || '').length });
     return true;
   }
 
   state.snapshot = null;
   state.restricted = true;
-  dom.pageTitle.textContent = "I can't read this browser page";
-  dom.pageChars.textContent = 'Read 0 chars';
+  bindI18n(dom.pageTitle, 'cantReadPage');
+  bindI18n(dom.pageChars, 'readChars', { n: 0 });
   return false;
 }
 
-async function handleFormFill(inputText = 'Fill this form') {
+async function handleFormFill(inputText = t('chipFill')) {
   await runFormFillFlow({
     inputText, state, dom, sendAction, refreshSnapshot,
     onUnreadable: showUnreadableCard,
@@ -273,7 +282,7 @@ async function handleUserSubmit(rawText, isRetry = false) {
   if (route.mode === 'find') {
     const res = await sendAction({ action: 'FIND', query: route.query });
     if (res.restricted) showUnreadableCard();
-    else if (!res.ok) appendErrorBubble(dom.chatMessages, dom.emptyState, res.error || 'Could not search this page.', '', () => handleUserSubmit(input, true));
+    else if (!res.ok) appendErrorBubble(dom.chatMessages, dom.emptyState, res.error || { key: 'errCouldNotSearch' }, '', () => handleUserSubmit(input, true));
     else appendFindCard(dom.chatMessages, dom.emptyState, route.query, res.count || 0, res.index || 0, sendAction);
     return;
   }
@@ -287,7 +296,7 @@ async function handleUserSubmit(rawText, isRetry = false) {
     return;
   }
 
-  if (/^(fill(\s+this|\s+the)?\s+form|autofill)\b/i.test(input)) {
+  if (/^(fill(\s+this|\s+the)?\s+form|autofill)\b/i.test(input) || Object.values(STRINGS).some((s) => s.chipFill === input)) {
     await handleFormFill(input);
     return;
   }
@@ -327,14 +336,17 @@ function prefillInput(prefix) {
   dom.chatInput.setSelectionRange(prefix.length, prefix.length);
 }
 
-function setDetailsStatus(text, kind = '') {
-  dom.detailsStatus.textContent = text;
+function setDetailsStatus(spec, kind = '') {
+  setStatusSpec(dom.detailsStatus, spec);
   dom.detailsStatus.className = kind ? `details-status ${kind}` : 'details-status';
 }
 
 function wireEvents() {
   dom.providerSelect.addEventListener('change', () => saveSettingsPatch({ whProvider: dom.providerSelect.value }));
-  dom.langSelect.addEventListener('change', () => { state.lang = dom.langSelect.value; saveSettingsPatch({ whLang: state.lang }); });
+  dom.langSelect.addEventListener('change', () => {
+    state.lang = dom.langSelect.value;
+    setLang(state.lang);
+  });
   dom.tabBtnChat.addEventListener('click', () => switchTab('tab-chat'));
   dom.tabBtnDetails.addEventListener('click', () => switchTab('tab-details'));
   dom.btnRefresh.addEventListener('click', () => refreshSnapshot(true));
@@ -346,11 +358,11 @@ function wireEvents() {
   dom.btnShowOriginal.addEventListener('click', restoreOriginalPage);
   dom.btnTranslateCancel.addEventListener('click', () => { if (state.translateCtl) state.translateCtl.aborted = true; state.translationActive = false; });
 
-  dom.chipWhatIsPage.addEventListener('click', () => handleUserSubmit('What is this page?'));
+  dom.chipWhatIsPage.addEventListener('click', () => handleUserSubmit(t('chipWhat')));
   dom.chipFind.addEventListener('click', () => prefillInput('Find '));
   dom.chipSearch.addEventListener('click', () => prefillInput('Search this site for '));
   dom.chipOpenUrl.addEventListener('click', () => prefillInput('Open '));
-  dom.chipFill.addEventListener('click', () => handleUserSubmit('Fill this form'));
+  dom.chipFill.addEventListener('click', () => handleUserSubmit(t('chipFill')));
 
   dom.btnStop.addEventListener('click', stopCurrentTask);
   dom.btnHelper.addEventListener('click', () => {
@@ -377,57 +389,52 @@ function wireEvents() {
     if (areaName !== 'local') return;
     if (changes.whGeminiKey || changes.whGroqKey) getSettings().then(updateKeyBanner);
     if (changes.whProvider) dom.providerSelect.value = changes.whProvider.newValue || 'auto';
-    if (changes.whLang) { state.lang = changes.whLang.newValue || 'en'; dom.langSelect.value = state.lang; }
+    if (changes.whLang) {
+      state.lang = changes.whLang.newValue || 'en';
+      dom.langSelect.value = state.lang;
+      setLang(state.lang, { persist: false });
+    }
     if (changes.whSavedDetails && state.detailsUi) state.detailsUi.reload();
   });
 }
 
 async function init() {
+  const onErrorBubble = (sum, raw, retryFn) => appendErrorBubble(dom.chatMessages, dom.emptyState, sum, raw, retryFn);
+  const onReply = (txt, prov) => appendAssistantMessage(dom.chatMessages, dom.emptyState, txt, prov);
   state.voice = createVoiceController({
-    btnMic: dom.btnMic,
-    micStatus: dom.micStatus,
-    chatInput: dom.chatInput,
-    langSelect: dom.langSelect,
-    sendAction,
-    onLanguageDetected: (lang) => {
-      state.lang = lang;
-      dom.langSelect.value = lang;
-      saveSettingsPatch({ whLang: lang });
-    },
-    onErrorBubble: (sum, raw, retryFn) => appendErrorBubble(dom.chatMessages, dom.emptyState, sum, raw, retryFn),
-    onResizeInput: autoResizeInput
+    btnMic: dom.btnMic, micStatus: dom.micStatus, chatInput: dom.chatInput, langSelect: dom.langSelect,
+    sendAction, onErrorBubble, onResizeInput: autoResizeInput,
+    onLanguageDetected: (lang) => { state.lang = lang; dom.langSelect.value = lang; setLang(lang); }
   });
   wireEvents();
   state.detailsUi = mountSavedDetailsUI({
-    container: dom.detailsContainer,
-    allowInsert: true,
-    onStatus: setDetailsStatus,
+    container: dom.detailsContainer, allowInsert: true, onStatus: setDetailsStatus,
     onInsert: async (item) => {
       const res = await sendAction({ action: 'INSERT_VALUE', value: item.value });
-      if (res.success || res.ok) setDetailsStatus(`Inserted "${item.label}" into focused field.`, 'ok');
-      else if (res.error === 'no_focus') setDetailsStatus('No field focused on the page. Click into an input box first.', 'err');
-      else setDetailsStatus(res.error || 'Could not insert value.', 'err');
+      if (res.success || res.ok) setDetailsStatus({ key: 'insertedDetail', vars: { label: item.label } }, 'ok');
+      else setDetailsStatus(res.error === 'no_focus' ? { key: 'noFieldFocused' } : (res.error || { key: 'insertFailed' }), 'err');
     }
   });
-
   state.helper = createHelperController({
-    dom, state, sendAction, refreshSnapshot,
-    onReply: (txt, prov) => appendAssistantMessage(dom.chatMessages, dom.emptyState, txt, prov),
-    onError: (sum, raw, retryFn) => appendErrorBubble(dom.chatMessages, dom.emptyState, sum, raw, retryFn),
-    onNoKey: () => dom.noKeyBanner.classList.remove('hidden'),
-    onUnreadable: showUnreadableCard,
+    dom, state, sendAction, refreshSnapshot, onReply, onError: onErrorBubble,
+    onNoKey: () => dom.noKeyBanner.classList.remove('hidden'), onUnreadable: showUnreadableCard,
     onAskApproval: (promptText, c) => promptActionApproval(dom.chatMessages, dom.emptyState, promptText, c),
     onCloseToggle: (flag) => { state.helper.setEnabled(flag); return saveSettingsPatch({ whHelper: flag }); },
     onSetRunning: setRunning
   });
 
-  const settings = await getSettings();
-  dom.providerSelect.value = settings.whProvider;
-  dom.langSelect.value = settings.whLang;
-  state.lang = settings.whLang;
-  state.helper.setEnabled(settings.whHelper);
-  dom.firstRunNotice.classList.toggle('hidden', settings.whNoticeAck);
-  updateKeyBanner(settings);
+  try {
+    const settings = await getSettings();
+    dom.providerSelect.value = settings.whProvider;
+    dom.langSelect.value = settings.whLang;
+    state.lang = settings.whLang;
+    await setLang(state.lang, { persist: false });
+    state.helper.setEnabled(settings.whHelper);
+    dom.firstRunNotice.classList.toggle('hidden', settings.whNoticeAck);
+    updateKeyBanner(settings);
+  } finally {
+    document.body.classList.remove('i18n-loading');
+  }
   await refreshSnapshot(false);
 }
 

@@ -1,5 +1,7 @@
 // FormMitra — Agent Routing, Prompt Construction, Action Validation & Step Loop
 
+import { t, bindI18n } from './i18n.js';
+
 const LANG_LABELS = {
   en: 'English',
   hi: 'Hindi (हिन्दी)',
@@ -201,13 +203,13 @@ export function isAutoAllowedNavClick(action) {
 }
 
 export function describeApproval(action) {
-  if (action.type === 'open_url') return action.query ? `I want to open: Google search for: ${action.query}` : `I want to open: ${action.url}`;
-  if (action.type === 'click') return `I want to click: "${action.text}" because ${action.reason}`;
-  if (action.type === 'type' && action.target === 'search') return `I want to type: "${action.text}" into the search box because ${action.reason}`;
-  if (action.type === 'type' && action.target === 'composer') return `I want to type a draft: "${action.text}" into the message box because ${action.reason}`;
-  if (action.type === 'scroll') return `I want to scroll ${action.direction || 'to element'} because ${action.reason}`;
-  if (action.type === 'find') return `I want to find "${action.text}" on the page because ${action.reason}`;
-  return `I want to run ${action.type} because ${action.reason}`;
+  if (action.type === 'open_url') return action.query ? { key: 'approveOpenSearch', vars: { query: action.query } } : { key: 'approveOpenUrl', vars: { url: action.url } };
+  if (action.type === 'click') return { key: 'approveClick', vars: { text: action.text, reason: action.reason } };
+  if (action.type === 'type' && action.target === 'search') return { key: 'approveTypeSearch', vars: { text: action.text, reason: action.reason } };
+  if (action.type === 'type' && action.target === 'composer') return { key: 'approveTypeComposer', vars: { text: action.text, reason: action.reason } };
+  if (action.type === 'scroll') return { key: 'approveScroll', vars: { dir: action.direction || 'down', reason: action.reason } };
+  if (action.type === 'find') return { key: 'approveFind', vars: { text: action.text, reason: action.reason } };
+  return { key: 'approveGeneric', vars: { type: action.type, reason: action.reason } };
 }
 
 function abortableSleep(ms, ctl) {
@@ -218,8 +220,6 @@ function abortableSleep(ms, ctl) {
     ctl.onAbort = () => { clearTimeout(timer); if (prev) prev(); resolve(false); };
   });
 }
-
-const STUCK_MSG = "I couldn't make that work on this page. Try clicking it yourself, or ask me something else.";
 
 export function raceAbort(promise, ctl) {
   return new Promise((resolve) => {
@@ -271,12 +271,12 @@ function describeEffectLabel(action, execRes) {
 }
 
 function formatStepLine(action, execRes, changed) {
-  const tag = changed ? 'page changed' : 'no visible change';
-  if (action.type === 'click') return `Clicked: ${execRes?.targetText || action.text} (${tag})`;
-  if (action.type === 'type') return `Typed "${action.text}" into ${action.target} (${tag})`;
-  if (action.type === 'scroll') return `Scrolled ${action.direction || 'page'} (${tag})`;
-  if (action.type === 'open_url') return `Opened: ${action.query ? `Google search for: ${action.query}` : action.url} (${tag})`;
-  return `${action.type} (${tag})`;
+  const status = changed ? '@i18n:stateChanged' : '@i18n:stateNoChange';
+  if (action.type === 'click') return { key: 'stepClicked', vars: { text: execRes?.targetText || action.text, status } };
+  if (action.type === 'type') return { key: 'stepTyped', vars: { text: action.text, target: action.target, status } };
+  if (action.type === 'scroll') return { key: 'stepScrolled', vars: { dir: action.direction || 'down', status } };
+  if (action.type === 'open_url') return { key: 'stepOpened', vars: { target: action.query || action.url, status } };
+  return `${action.type} (${t(changed ? 'stateChanged' : 'stateNoChange')})`;
 }
 
 async function waitForSettledSnapshot({ action, preFp, ctl, refreshSnapshot, state }) {
@@ -318,28 +318,28 @@ export async function runAgentLoop({
   const attemptedActions = new Set();
   let noEffectStreak = 0;
 
-  const setPending = (text) => {
-    pending.textContent = text;
+  const setPending = (key) => {
+    bindI18n(pending, key);
     if (!pending.isConnected) dom.chatMessages.appendChild(pending);
     dom.chatMessages.parentElement.scrollTop = dom.chatMessages.parentElement.scrollHeight;
   };
   const pushNoEffect = (note) => {
     noEffectStreak += 1;
     stepNotes.push(note);
-    if (noEffectStreak >= 2) { onReply(STUCK_MSG, null); return true; }
+    if (noEffectStreak >= 2) { onReply(t('stuckMsg'), null); return true; }
     return false;
   };
 
   const pending = document.createElement('div');
   pending.className = 'msg msg-pending';
   dom.emptyState.classList.add('hidden');
-  setPending('Thinking...');
+  setPending('thinking');
 
   try {
     for (let step = 0; step < 6; step++) {
       if (ctl.aborted) break;
       if (step > 0) {
-        setPending('Waiting before next step...');
+        setPending('waitingNextStep');
         if (!(await abortableSleep(400, ctl))) break;
       }
       if ((await raceAbort(refreshSnapshot(false), ctl)).aborted || ctl.aborted) break;
@@ -347,7 +347,7 @@ export async function runAgentLoop({
       if (isUnreadableSnapshot(state.snapshot, state.restricted)) {
         pending.remove();
         const nav = step === 0 ? parseNavigationIntent(goal) : null;
-        if (nav?.blocked) { onReply('Blocked unsafe URL scheme. Only http:// and https:// URLs are allowed.', null); return; }
+        if (nav?.blocked) { onReply(t('blockedUrlScheme'), null); return; }
         if (!nav) { onUnreadable(); return; }
         if ((await onAskApproval(describeApproval(nav), ctl)) !== 'allow' || ctl.aborted) return;
         const preFp = computeFingerprint(state.snapshot);
@@ -355,14 +355,14 @@ export async function runAgentLoop({
         const navCall = await raceAbort(executeAction(nav, sendAction), ctl);
         if (navCall.aborted || ctl.aborted) break;
         const navRes = navCall.value || {};
-        if (!navRes.success && !navRes.ok) { onError('Could not open page.', navRes.error || '', onRetry); return; }
+        if (!navRes.success && !navRes.ok) { onError({ key: 'errCouldNotOpen' }, navRes.error || '', onRetry); return; }
         if ((await raceAbort(refreshSnapshot(false), ctl)).aborted || ctl.aborted) break;
         if (onStep) onStep(formatStepLine(nav, navRes, computeFingerprint(state.snapshot) !== preFp));
         stepNotes.push(nav.query ? `Opened Google search for: ${nav.query}` : `Opened ${nav.url}`);
         continue;
       }
 
-      setPending('Thinking...');
+      setPending('thinking');
       const llmCall = await raceAbort(sendAction({
         action: 'LLM_CALL',
         systemPrompt: buildAgentSystemPrompt(state.lang),
@@ -375,7 +375,7 @@ export async function runAgentLoop({
       if (!resp.ok || !resp.data || typeof resp.data.reply !== 'string') {
         pending.remove();
         if (resp.code === 'NO_KEY') onNoKey();
-        onError(resp.summary || 'Could not get a response from the AI provider.', resp.error || '', onRetry);
+        onError(resp.summary || { key: 'errAiResp' }, resp.error || '', onRetry);
         return;
       }
 
@@ -406,21 +406,21 @@ export async function runAgentLoop({
       const execCall = await raceAbort(executeAction(action, sendAction), ctl);
       if (execCall.aborted || ctl.aborted) break;
       const execRes = execCall.value || {};
-      if (execRes.error === 'blocked') { onReply('Action blocked by safety guard.', null); return; }
+      if (execRes.error === 'blocked') { onReply(t('blockedSafetyMsg'), null); return; }
       if (!execRes.success && !execRes.ok) {
         if (pushNoEffect(`Last action ${describeEffectLabel(action, execRes)} failed and had no visible effect. Choose a different element or finish.`)) return;
         continue;
       }
 
       if (isComposerType) {
-        const msg = 'Draft typed. Review it and press Send yourself.';
+        const msg = t('draftTypedMsg');
         state.history.push({ role: 'user', content: goal }, { role: 'assistant', content: msg });
         onReply(msg, null);
         return;
       }
       if (action.type === 'find') { onFind(action.text, execRes.count || 0, execRes.index || 0); return; }
 
-      setPending('Checking page...');
+      setPending('checkingPage');
       const postFp = await waitForSettledSnapshot({ action, preFp, ctl, refreshSnapshot, state });
       pending.remove();
       if (postFp === null || ctl.aborted) break;
@@ -438,7 +438,7 @@ export async function runAgentLoop({
       }
     }
 
-    onReply(ctl.aborted ? 'Stopped.' : 'Reached maximum step limit.', null);
+    onReply(t(ctl.aborted ? 'stoppedMsg' : 'maxStepsMsg'), null);
   } finally {
     if (pending.isConnected) pending.remove();
   }

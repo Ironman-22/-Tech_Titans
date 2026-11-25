@@ -7,6 +7,7 @@ import {
   normalizeDirectUrlOrQuery, raceAbort
 } from '../lib/agent.js';
 import { matchSelectOption } from '../lib/form-fill.js';
+import { t, bindI18n, clearI18n } from '../lib/i18n.js';
 
 const LANG_NAMES = { en: 'English', hi: 'Hindi (हिन्दी)', kn: 'Kannada (ಕನ್ನಡ)' };
 const VALID_STEP_TYPES = new Set(['click', 'type', 'fill_field', 'scroll', 'manual', 'open_url']);
@@ -74,7 +75,8 @@ function validatePlanSteps(rawPlan, snapshot, details, maxSteps = 8) {
       const detail = itemLabel ? detailByLabel.get(itemLabel.toLowerCase()) : null;
       if (field.type === 'password' || isSensitiveLabel(field.label) || detail?.sensitive) {
         type = 'manual';
-        if (!/yourself/i.test(text)) text = `${text} (enter this yourself)`;
+        const hint = t('enterYourself');
+        if (!text.toLowerCase().includes(hint.toLowerCase()) && !/yourself/i.test(text)) text = `${text} (${hint})`;
       }
     } else if (type === 'type') {
       if (targetId && !fieldMap.has(targetId) && !interactiveMap.has(targetId)) continue;
@@ -108,9 +110,10 @@ export function createHelperController({
   const stopPolling = () => { clearTimeout(h.pollTimer); h.pollTimer = null; };
   const stepTargetId = (step) => (step && step.status === 'pending' ? (step.fieldId || step.targetId) : null);
 
-  function mkBtn(label, cls, onClick) {
+  function mkBtn(i18nKey, cls, onClick) {
     const b = document.createElement('button');
-    b.type = 'button'; b.className = cls; b.textContent = label; b.disabled = h.busy;
+    b.type = 'button'; b.className = cls; b.disabled = h.busy;
+    bindI18n(b, i18nKey);
     b.addEventListener('click', onClick);
     return b;
   }
@@ -137,43 +140,52 @@ export function createHelperController({
     dom.helperActions.textContent = '';
 
     if (h.steps.length === 0) {
-      dom.helperGoal.textContent = 'Helper Mode';
-      dom.helperExplain.textContent = 'Type a goal below (e.g. "help me fill this form") for guided steps.';
-      dom.helperActions.appendChild(mkBtn('Close', 'btn-card', closeHelper));
+      bindI18n(dom.helperGoal, 'helperModeTitle');
+      bindI18n(dom.helperExplain, 'helperEmptyHint');
+      dom.helperActions.appendChild(mkBtn('closeBtn', 'btn-card', closeHelper));
       return;
     }
 
-    dom.helperGoal.textContent = h.goal || 'Guided Steps';
+    if (h.goal) { clearI18n(dom.helperGoal); dom.helperGoal.textContent = h.goal; }
+    else bindI18n(dom.helperGoal, 'guidedSteps');
     h.steps.forEach((step, idx) => {
       const li = document.createElement('li');
       const cls = step.status !== 'pending' ? step.status : (idx === h.currentIdx ? 'current' : '');
       li.className = cls ? `helper-step ${cls}` : 'helper-step';
-      li.textContent = `${step.status === 'done' ? '[Done] ' : (step.status === 'skipped' ? '[Skipped] ' : '')}${step.text}`;
+      li.textContent = '';
+      if (step.status === 'done' || step.status === 'skipped') {
+        const pfx = document.createElement('span');
+        bindI18n(pfx, step.status === 'done' ? 'prefixDone' : 'prefixSkipped');
+        li.append(pfx, step.text);
+      } else {
+        li.textContent = step.text;
+      }
       dom.helperSteps.appendChild(li);
     });
 
     if (h.replanOnly) {
-      dom.helperExplain.textContent = 'Page changed after 2 automatic re-plans. Click Re-plan to update steps.';
-      dom.helperActions.appendChild(mkBtn('Re-plan', 'btn-card btn-allow', () => startPlan(h.goal, true)));
+      bindI18n(dom.helperExplain, 'replanCapMsg');
+      dom.helperActions.appendChild(mkBtn('replanBtn', 'btn-card btn-allow', () => startPlan(h.goal, true)));
       return;
     }
 
     const cur = h.steps[h.currentIdx];
     if (!cur) {
-      dom.helperExplain.textContent = 'All steps done. Review the page, then submit it yourself.';
-      dom.helperActions.append(mkBtn('Re-plan', 'btn-card', () => startPlan(h.goal, true)), mkBtn('Close', 'btn-card', closeHelper));
+      bindI18n(dom.helperExplain, 'allStepsDone');
+      dom.helperActions.append(mkBtn('replanBtn', 'btn-card', () => startPlan(h.goal, true)), mkBtn('closeBtn', 'btn-card', closeHelper));
       return;
     }
 
+    clearI18n(dom.helperExplain);
     dom.helperExplain.textContent = cur.text;
     const primary = cur.type === 'manual'
-      ? mkBtn('Done', 'btn-card btn-allow', () => markAndAdvance('done'))
-      : mkBtn('Do it for me', 'btn-card btn-allow', runCurrentStep);
+      ? mkBtn('doneBtn', 'btn-card btn-allow', () => markAndAdvance('done'))
+      : mkBtn('doItBtn', 'btn-card btn-allow', runCurrentStep);
     dom.helperActions.append(
       primary,
-      mkBtn('Skip', 'btn-card', () => markAndAdvance('skipped')),
-      mkBtn('Re-plan', 'btn-card', () => startPlan(h.goal, true)),
-      mkBtn('Close', 'btn-card', closeHelper)
+      mkBtn('skipBtn', 'btn-card', () => markAndAdvance('skipped')),
+      mkBtn('replanBtn', 'btn-card', () => startPlan(h.goal, true)),
+      mkBtn('closeBtn', 'btn-card', closeHelper)
     );
   }
 
@@ -183,7 +195,7 @@ export function createHelperController({
     stopPolling();
     await sendAction({ action: 'SPOTLIGHT_CLEAR' });
     render();
-    onReply('All steps done. Review the page, then submit it yourself.', null);
+    onReply(t('allStepsDone'), null);
   }
 
   async function advanceAfterCompletion(newSnap) {
@@ -279,13 +291,13 @@ export function createHelperController({
         const details = await getSavedDetails();
         const detail = step.itemLabel ? details.find((d) => d.label.toLowerCase() === step.itemLabel.toLowerCase()) : null;
         if (!field || field.type === 'password' || isSensitiveLabel(field.label) || detail?.sensitive) {
-          step.type = 'manual'; step.text = `${field?.label || 'Sensitive field'}: enter this yourself.`;
+          step.type = 'manual'; step.text = `${field?.label || t('sensitiveBadge')}: ${t('enterYourself')}.`;
           render(); await spotlightCurrent(); schedulePoll(); return;
         }
-        if (!detail) { dom.helperExplain.textContent = `No saved detail for "${step.itemLabel || field.label}". Enter it manually or press Done.`; return; }
+        if (!detail) { bindI18n(dom.helperExplain, 'noSavedDetailFor', { label: step.itemLabel || field.label }); return; }
         const val = field.type === 'select' && field.options?.length ? matchSelectOption(field.options, detail.value) : detail.value;
-        if (val == null) { dom.helperExplain.textContent = `Saved value does not match "${field.label}" options.`; return; }
-        if ((await onAskApproval(`I want to fill "${field.label}" with your saved "${detail.label}"`, ctl)) !== 'allow' || ctl.aborted) return;
+        if (val == null) { bindI18n(dom.helperExplain, 'savedValNoMatch', { label: field.label }); return; }
+        if ((await onAskApproval({ key: 'approveFillField', vars: { field: field.label, label: detail.label } }, ctl)) !== 'allow' || ctl.aborted) return;
         const fillCall = await raceAbort(sendAction({ action: 'FILL', entries: [{ id: field.id, value: val, tier: 'green' }] }), ctl);
         if (fillCall.aborted || ctl.aborted || !fillCall.value?.ok) return;
       } else {
@@ -301,7 +313,7 @@ export function createHelperController({
         if (ctl.aborted) return;
         const execCall = await raceAbort(executeAction(act, sendAction), ctl);
         if (execCall.aborted || ctl.aborted) return;
-        if (execCall.value?.error === 'blocked') { onReply('Action blocked by safety guard.', null); step.type = 'manual'; render(); return; }
+        if (execCall.value?.error === 'blocked') { onReply(t('blockedSafetyMsg'), null); step.type = 'manual'; render(); return; }
         if (!execCall.value?.success && !execCall.value?.ok) return;
       }
 
@@ -325,8 +337,9 @@ export function createHelperController({
     h.replanOnly = false; h.busy = true;
     const ctl = { aborted: false, onAbort: null }; h.ctl = ctl;
     dom.helperPanel.classList.remove('hidden');
+    clearI18n(dom.helperGoal);
     dom.helperGoal.textContent = h.goal;
-    dom.helperExplain.textContent = isReplan ? 'Updating plan...' : 'Building steps...';
+    bindI18n(dom.helperExplain, isReplan ? 'updatingPlan' : 'buildingSteps');
     dom.helperActions.textContent = '';
 
     try {
@@ -345,12 +358,12 @@ export function createHelperController({
       const resp = call.value || {};
       if (!resp.ok || !resp.data) {
         if (resp.code === 'NO_KEY') onNoKey();
-        onError(resp.summary || 'Could not build steps for this page.', resp.error || '', () => startPlan(h.goal, isReplan));
+        onError(resp.summary || { key: 'errBuildSteps' }, resp.error || '', () => startPlan(h.goal, isReplan));
         h.busy = false; render(); return;
       }
 
       const freshSteps = validatePlanSteps(resp.data, snap, details, Math.max(1, 8 - completed.length));
-      if (freshSteps.length < 1 && completed.length === 0) { clearAll(true); onReply("I couldn't build steps for this page", resp.provider); return; }
+      if (freshSteps.length < 1 && completed.length === 0) { clearAll(true); onReply(t('couldntBuildSteps'), resp.provider); return; }
 
       h.steps = [...completed, ...freshSteps].slice(0, 8).map((s, i) => ({ ...s, n: i + 1 }));
       h.currentIdx = completed.length; h.planUrl = snap.url || ''; h.baselineFp = computeFingerprint(snap);

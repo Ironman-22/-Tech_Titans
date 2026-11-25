@@ -12,7 +12,7 @@
   --ok: #127A48;
   --err: #B42318;
   --radius: 8px;
-  --font: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans Devanagari', 'Noto Sans Kannada', 'Nirmala UI', 'Tunga', sans-serif;
+  --font: system-ui, "Nirmala UI", "Noto Sans Kannada", "Noto Sans Devanagari", -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -45,6 +45,8 @@ body {
   padding: 32px 16px;
 }
 
+body.i18n-loading { opacity: 0; }
+
 .container {
   max-width: 640px;
   margin: 0 auto;
@@ -53,11 +55,29 @@ body {
   gap: 24px;
 }
 
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
 .page-header .brand {
   display: flex;
   align-items: flex-start;
   gap: 12px;
 }
+.options-lang-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.options-lang-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.options-lang-select { min-width: 110px; }
 
 .brand-mark {
   flex-shrink: 0;
@@ -141,7 +161,7 @@ input, select {
 
 .input-row input {
   flex: 1;
-  min-width: 200px;
+  min-width: 160px;
 }
 
 input:focus-visible, select:focus-visible, button:focus-visible {
@@ -157,7 +177,6 @@ input:focus-visible, select:focus-visible, button:focus-visible {
   border-radius: var(--radius);
   border: 1px solid transparent;
   cursor: pointer;
-  white-space: nowrap;
 }
 
 .btn:disabled {

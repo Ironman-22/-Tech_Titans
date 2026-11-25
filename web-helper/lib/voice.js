@@ -1,5 +1,7 @@
 // FormMitra — Voice State Machine ('idle' | 'recording' | 'transcribing', MediaRecorder + Web Speech fallback)
 
+import { t, bindI18n, clearI18n } from './i18n.js';
+
 const SPEECH_LOCALE = {
   en: 'en-IN',
   hi: 'hi-IN',
@@ -31,14 +33,22 @@ export function createVoiceController({
   let recordingStartedAt = 0;
   let recordedTooShort = false;
 
-  function setMicUi(stateName, statusText = '') {
+  function setMicUi(stateName, statusKey = '') {
     voiceState = stateName;
     btnMic.classList.toggle('recording', stateName === 'recording');
     btnMic.classList.toggle('busy', stateName === 'transcribing');
     btnMic.disabled = stateName === 'transcribing';
-    btnMic.setAttribute('aria-label', stateName === 'recording' ? 'Stop recording' : 'Voice input');
-    micStatus.textContent = statusText;
-    micStatus.classList.toggle('hidden', !statusText);
+    const ariaKey = stateName === 'recording' ? 'stopRecAria' : 'voiceInputAria';
+    btnMic.dataset.i18nAria = ariaKey;
+    btnMic.setAttribute('aria-label', t(ariaKey));
+    if (statusKey) {
+      bindI18n(micStatus, statusKey);
+      micStatus.classList.remove('hidden');
+    } else {
+      clearI18n(micStatus);
+      micStatus.textContent = '';
+      micStatus.classList.add('hidden');
+    }
   }
 
   function stopTracks() {
@@ -74,7 +84,7 @@ export function createVoiceController({
 
     stopTracks();
     audioChunks = [];
-    setMicUi('idle', keepStatus ? micStatus.textContent : '');
+    setMicUi('idle', keepStatus ? (micStatus.dataset.i18n || '') : '');
   }
 
   function getLangHint() {
@@ -86,7 +96,7 @@ export function createVoiceController({
     const clean = String(text || '').trim();
     if (!clean) {
       cleanup();
-      setMicUi('idle', "I couldn't hear anything. Try again closer to the mic.");
+      setMicUi('idle', 'micNoAudio');
       return;
     }
 
@@ -99,7 +109,7 @@ export function createVoiceController({
     }
     cleanup();
     if (wrongScript) {
-      setMicUi('idle', 'I heard this as English. Speak a little slower, or check the language in the header.');
+      setMicUi('idle', 'micWrongScript');
     }
   }
 
@@ -108,7 +118,7 @@ export function createVoiceController({
     if (!SpeechRec) {
       const detail = priorError || 'Speech recognition is unavailable in this browser.';
       cleanup();
-      onErrorBubble('Voice transcription failed.', detail, () => toggle());
+      onErrorBubble({ key: 'errVoiceFail' }, detail, () => toggle());
       return;
     }
 
@@ -118,7 +128,7 @@ export function createVoiceController({
     rec.interimResults = false;
     rec.maxAlternatives = 1;
 
-    setMicUi('recording', 'Listening via browser speech... tap again to stop');
+    setMicUi('recording', 'micListeningSpeech');
 
     rec.onresult = (e) => {
       const text = e.results?.[0]?.[0]?.transcript || '';
@@ -131,11 +141,11 @@ export function createVoiceController({
       recognition = null;
       cleanup();
       if (errCode === 'no-speech') {
-        setMicUi('idle', "I couldn't hear anything. Try again closer to the mic.");
+        setMicUi('idle', 'micNoAudio');
         return;
       }
       const combined = priorError ? `${priorError} | speech: ${errCode}` : errCode;
-      onErrorBubble('Voice input failed.', combined, () => toggle());
+      onErrorBubble({ key: 'errVoiceInput' }, combined, () => toggle());
     };
 
     rec.onend = () => {
@@ -150,7 +160,7 @@ export function createVoiceController({
     } catch (err) {
       recognition = null;
       cleanup();
-      onErrorBubble('Voice input failed.', `${err.name || 'speech'}: ${err.message}`, () => toggle());
+      onErrorBubble({ key: 'errVoiceInput' }, `${err.name || 'speech'}: ${err.message}`, () => toggle());
     }
   }
 
@@ -191,14 +201,14 @@ export function createVoiceController({
     stopTimer = null;
 
     if (recognition) {
-      setMicUi('transcribing', 'Finishing speech...');
+      setMicUi('transcribing', 'micFinishing');
       try { recognition.stop(); } catch (_) { cleanup(); }
       return;
     }
 
     recordedTooShort = recordingStartedAt > 0 && (Date.now() - recordingStartedAt) < 800;
     recordingMime = (mediaRecorder && mediaRecorder.mimeType) || 'audio/webm';
-    setMicUi('transcribing', 'Transcribing...');
+    setMicUi('transcribing', 'micTranscribing');
 
     // Stop recorder AND every stream track in the same tick
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
@@ -243,7 +253,7 @@ export function createVoiceController({
       mr.onerror = (e) => {
         const err = e.error;
         cleanup();
-        onErrorBubble('Recording failed.', `${err?.name || 'recording-error'}: ${err?.message || 'MediaRecorder error'}`, () => toggle());
+        onErrorBubble({ key: 'errRecFailed' }, `${err?.name || 'recording-error'}: ${err?.message || 'MediaRecorder error'}`, () => toggle());
       };
 
       mr.onstop = () => {
@@ -253,7 +263,7 @@ export function createVoiceController({
         if (runId !== activeRunId) return;
         if (recordedTooShort) {
           cleanup();
-          setMicUi('idle', 'That was too short. Tap the mic, speak, then tap again.');
+          setMicUi('idle', 'micTooShort');
           return;
         }
         transcribeBlob(blob, recordingMime, runId, langHint);
@@ -261,7 +271,7 @@ export function createVoiceController({
 
       recordingStartedAt = Date.now();
       mr.start();
-      setMicUi('recording', 'Listening... tap again to stop');
+      setMicUi('recording', 'micListening');
 
       stopTimer = setTimeout(() => {
         if (voiceState === 'recording') stopImmediately();
@@ -271,10 +281,10 @@ export function createVoiceController({
       const name = err?.name || 'audio-capture';
       if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
         chrome.tabs.create({ url: chrome.runtime.getURL('permission.html') });
-        setMicUi('idle', 'Please allow the microphone in the tab that just opened, then press the mic again.');
+        setMicUi('idle', 'micAllowTab');
         return;
       }
-      onErrorBubble('Could not access microphone.', `${name}: ${err?.message || 'Microphone error'}`, () => toggle());
+      onErrorBubble({ key: 'errMicAccess' }, `${name}: ${err?.message || 'Microphone error'}`, () => toggle());
     }
   }
 

@@ -8,10 +8,12 @@ import {
   clearAllData
 } from './lib/storage.js';
 import { mountSavedDetailsUI } from './lib/details-ui.js';
+import { t, bindI18n, clearI18n, setLang } from './lib/i18n.js';
 
 const $ = (id) => document.getElementById(id);
 
 const dom = {
+  optionsLang: $('options-lang'),
   btnRefreshModels: $('btn-refresh-models'),
   modelsStatus: $('models-status'),
   geminiKey: $('gemini-key'),
@@ -32,8 +34,9 @@ const dom = {
 
 let detailsUi = null;
 
-function setStatus(el, text, kind = '') {
-  el.textContent = text;
+function setStatus(el, spec, kind = '') {
+  if (spec && typeof spec === 'object' && spec.key) bindI18n(el, spec.key, spec.vars || null);
+  else { clearI18n(el); el.textContent = spec || ''; }
   el.className = kind ? `status-line ${kind}` : 'status-line';
 }
 
@@ -43,7 +46,7 @@ function sendAction(payload) {
       if (chrome.runtime.lastError) {
         resolve({ ok: false, summary: chrome.runtime.lastError.message, error: chrome.runtime.lastError.message });
       } else {
-        resolve(resp || { ok: false, summary: 'No response from background.', error: 'No response.' });
+        resolve(resp || { ok: false, summary: t('noBgResp'), error: t('noBgResp') });
       }
     });
   });
@@ -79,12 +82,12 @@ async function refreshProviderModels(provider, apiKey, silent = false) {
   if (resp.ok && Array.isArray(resp.models) && resp.models.length > 0) {
     const chosen = populateSelect(selectEl, resp.models, currentModel, defaultModel);
     await saveSettingsPatch(provider === 'gemini' ? { whGeminiModel: chosen } : { whGroqModel: chosen });
-    if (!silent) setStatus(provider === 'gemini' ? dom.geminiStatus : dom.groqStatus, `Loaded ${resp.models.length} models.`, 'ok');
+    if (!silent) setStatus(provider === 'gemini' ? dom.geminiStatus : dom.groqStatus, { key: 'loadedModels', vars: { n: resp.models.length } }, 'ok');
     return { ok: true, count: resp.models.length };
   }
 
   if (!silent) {
-    setStatus(provider === 'gemini' ? dom.geminiStatus : dom.groqStatus, resp.summary || 'Could not load models.', 'err');
+    setStatus(provider === 'gemini' ? dom.geminiStatus : dom.groqStatus, resp.summary || { key: 'couldNotLoadModels' }, 'err');
   }
   return { ok: false, error: resp.summary };
 }
@@ -100,7 +103,7 @@ async function saveKeyOnly(provider) {
   }
 
   inputEl.value = res.key;
-  setStatus(statusEl, res.key ? 'API key saved locally.' : 'API key cleared.', 'ok');
+  setStatus(statusEl, { key: res.key ? 'keySaved' : 'keyCleared' }, 'ok');
   if (res.key) await refreshProviderModels(provider, res.key, true);
   return res.key;
 }
@@ -114,18 +117,18 @@ async function testProvider(provider) {
   const saved = await saveProviderKey(provider, inputEl.value);
   if (!saved.ok) { setStatus(statusEl, saved.error, 'err'); return; }
   inputEl.value = saved.key;
-  if (!saved.key) { setStatus(statusEl, 'Paste an API key first.', 'err'); return; }
+  if (!saved.key) { setStatus(statusEl, { key: 'pasteKeyFirst' }, 'err'); return; }
 
   testBtn.disabled = true;
-  setStatus(statusEl, 'Testing connection...');
+  setStatus(statusEl, { key: 'testingConn' });
 
   try {
     const resp = await sendAction({ action: 'TEST_PROVIDER', provider, apiKey: saved.key, model: selectEl.value });
     if (resp.ok) {
-      setStatus(statusEl, `Connected (${resp.model}).`, 'ok');
+      setStatus(statusEl, { key: 'connectedModel', vars: { model: resp.model } }, 'ok');
       await refreshProviderModels(provider, saved.key, true);
     } else {
-      setStatus(statusEl, resp.error || resp.summary || 'Connection failed.', 'err');
+      setStatus(statusEl, resp.error || resp.summary || { key: 'connFailed' }, 'err');
     }
   } finally {
     testBtn.disabled = false;
@@ -134,22 +137,22 @@ async function testProvider(provider) {
 
 async function refreshAllModels() {
   dom.btnRefreshModels.disabled = true;
-  setStatus(dom.modelsStatus, 'Refreshing available models...');
+  setStatus(dom.modelsStatus, { key: 'refreshingModels' });
   try {
     const gKey = dom.geminiKey.value.trim();
     const qKey = dom.groqKey.value.trim();
-    if (!gKey && !qKey) { setStatus(dom.modelsStatus, 'Add at least one API key first.', 'err'); return; }
+    if (!gKey && !qKey) { setStatus(dom.modelsStatus, { key: 'addOneKeyFirst' }, 'err'); return; }
 
     const parts = [];
     if (gKey) {
       const g = await refreshProviderModels('gemini', gKey, false);
-      parts.push(g.ok ? `Gemini: ${g.count}` : 'Gemini failed');
+      parts.push(g.ok ? `Gemini: ${g.count}` : t('providerFailedCount', { provider: 'Gemini' }));
     }
     if (qKey) {
       const q = await refreshProviderModels('groq', qKey, false);
-      parts.push(q.ok ? `Groq: ${q.count}` : 'Groq failed');
+      parts.push(q.ok ? `Groq: ${q.count}` : t('providerFailedCount', { provider: 'Groq' }));
     }
-    setStatus(dom.modelsStatus, `Models refreshed (${parts.join(', ')}).`, 'ok');
+    setStatus(dom.modelsStatus, { key: 'modelsRefreshed', vars: { parts: parts.join(', ') } }, 'ok');
   } finally {
     dom.btnRefreshModels.disabled = false;
   }
@@ -159,22 +162,30 @@ async function loadInitialState() {
   detailsUi = mountSavedDetailsUI({
     container: dom.savedDetailsContainer,
     allowInsert: false,
-    onStatus: (txt, kind) => {
-      dom.savedDetailsStatus.textContent = txt;
+    onStatus: (spec, kind) => {
+      if (spec && typeof spec === 'object' && spec.key) bindI18n(dom.savedDetailsStatus, spec.key, spec.vars || null);
+      else { clearI18n(dom.savedDetailsStatus); dom.savedDetailsStatus.textContent = spec || ''; }
       dom.savedDetailsStatus.className = kind ? `details-status ${kind}` : 'details-status';
     }
   });
 
-  const s = await getSettings();
-  dom.geminiKey.value = s.whGeminiKey;
-  dom.groqKey.value = s.whGroqKey;
-  populateSelect(dom.geminiModel, [{ id: s.whGeminiModel, name: s.whGeminiModel }], s.whGeminiModel, DEFAULTS.whGeminiModel);
-  populateSelect(dom.groqModel, [{ id: s.whGroqModel, name: s.whGroqModel }], s.whGroqModel, DEFAULTS.whGroqModel);
+  try {
+    const s = await getSettings();
+    dom.optionsLang.value = s.whLang;
+    await setLang(s.whLang, { persist: false });
+    dom.geminiKey.value = s.whGeminiKey;
+    dom.groqKey.value = s.whGroqKey;
+    populateSelect(dom.geminiModel, [{ id: s.whGeminiModel, name: s.whGeminiModel }], s.whGeminiModel, DEFAULTS.whGeminiModel);
+    populateSelect(dom.groqModel, [{ id: s.whGroqModel, name: s.whGroqModel }], s.whGroqModel, DEFAULTS.whGroqModel);
 
-  if (s.whGeminiKey) refreshProviderModels('gemini', s.whGeminiKey, true);
-  if (s.whGroqKey) refreshProviderModels('groq', s.whGroqKey, true);
+    if (s.whGeminiKey) refreshProviderModels('gemini', s.whGeminiKey, true);
+    if (s.whGroqKey) refreshProviderModels('groq', s.whGroqKey, true);
+  } finally {
+    document.body.classList.remove('i18n-loading');
+  }
 }
 
+dom.optionsLang.addEventListener('change', () => setLang(dom.optionsLang.value));
 dom.btnSaveGemini.addEventListener('click', () => saveKeyOnly('gemini'));
 dom.btnSaveGroq.addEventListener('click', () => saveKeyOnly('groq'));
 dom.btnTestGemini.addEventListener('click', () => testProvider('gemini'));
@@ -184,21 +195,29 @@ dom.geminiModel.addEventListener('change', () => saveSettingsPatch({ whGeminiMod
 dom.groqModel.addEventListener('change', () => saveSettingsPatch({ whGroqModel: dom.groqModel.value }));
 
 dom.btnDeleteAll.addEventListener('click', async () => {
-  if (!window.confirm('Delete all API keys, saved details, model choices, and preferences stored by FormMitra?')) return;
+  if (!window.confirm(t('deleteConfirm'))) return;
   await clearAllData();
   dom.geminiKey.value = '';
   dom.groqKey.value = '';
+  dom.optionsLang.value = DEFAULTS.whLang;
+  await setLang(DEFAULTS.whLang, { persist: false });
   populateSelect(dom.geminiModel, [{ id: DEFAULTS.whGeminiModel, name: DEFAULTS.whGeminiModel }], DEFAULTS.whGeminiModel, DEFAULTS.whGeminiModel);
   populateSelect(dom.groqModel, [{ id: DEFAULTS.whGroqModel, name: DEFAULTS.whGroqModel }], DEFAULTS.whGroqModel, DEFAULTS.whGroqModel);
   if (detailsUi) await detailsUi.reload();
   setStatus(dom.geminiStatus, '');
   setStatus(dom.groqStatus, '');
   setStatus(dom.modelsStatus, '');
-  setStatus(dom.dataStatus, 'All data deleted.', 'ok');
+  setStatus(dom.dataStatus, { key: 'allDataDeleted' }, 'ok');
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === 'local' && changes.whSavedDetails && detailsUi) detailsUi.reload();
+  if (areaName !== 'local') return;
+  if (changes.whSavedDetails && detailsUi) detailsUi.reload();
+  if (changes.whLang) {
+    const next = changes.whLang.newValue || DEFAULTS.whLang;
+    dom.optionsLang.value = next;
+    setLang(next, { persist: false });
+  }
 });
 
 loadInitialState();

@@ -6,6 +6,7 @@ import {
   upsertSavedDetail,
   deleteSavedDetail
 } from './storage.js';
+import { t, bindI18n, applyI18n } from './i18n.js';
 
 export function mountSavedDetailsUI({
   container,
@@ -21,13 +22,13 @@ export function mountSavedDetailsUI({
   const searchInput = document.createElement('input');
   searchInput.type = 'search';
   searchInput.className = 'details-search';
-  searchInput.placeholder = 'Search saved details...';
-  searchInput.setAttribute('aria-label', 'Search saved details');
+  searchInput.dataset.i18nPlaceholder = 'searchDetailsPh';
+  searchInput.dataset.i18nAria = 'searchDetailsPh';
 
   const addToggleBtn = document.createElement('button');
   addToggleBtn.type = 'button';
   addToggleBtn.className = 'btn btn-primary btn-sm-detail';
-  addToggleBtn.textContent = 'Add detail';
+  bindI18n(addToggleBtn, 'addDetailBtn');
   toolbar.append(searchInput, addToggleBtn);
 
   const form = document.createElement('form');
@@ -35,24 +36,24 @@ export function mountSavedDetailsUI({
 
   const labelIn = document.createElement('input');
   labelIn.type = 'text';
-  labelIn.placeholder = 'Label (e.g. Full Name, Email, PAN)';
+  labelIn.dataset.i18nPlaceholder = 'detailLabelPh';
   labelIn.required = true;
 
   const valueIn = document.createElement('input');
   valueIn.type = 'text';
-  valueIn.placeholder = 'Value';
+  valueIn.dataset.i18nPlaceholder = 'detailValuePh';
   valueIn.required = true;
 
   const groupIn = document.createElement('input');
   groupIn.type = 'text';
-  groupIn.placeholder = 'Group (e.g. Personal, Work)';
+  groupIn.dataset.i18nPlaceholder = 'detailGroupPh';
 
   const sensWrap = document.createElement('label');
   sensWrap.className = 'detail-sens-check';
   const sensIn = document.createElement('input');
   sensIn.type = 'checkbox';
   const sensTxt = document.createElement('span');
-  sensTxt.textContent = 'Sensitive (never sent or auto-filled)';
+  bindI18n(sensTxt, 'detailSensCheck');
   sensWrap.append(sensIn, sensTxt);
 
   const formActions = document.createElement('div');
@@ -60,11 +61,11 @@ export function mountSavedDetailsUI({
   const saveBtn = document.createElement('button');
   saveBtn.type = 'submit';
   saveBtn.className = 'btn btn-primary btn-sm-detail';
-  saveBtn.textContent = 'Save';
+  bindI18n(saveBtn, 'saveBtn');
   const cancelBtn = document.createElement('button');
   cancelBtn.type = 'button';
   cancelBtn.className = 'btn btn-secondary btn-sm-detail';
-  cancelBtn.textContent = 'Cancel';
+  bindI18n(cancelBtn, 'cancelBtn');
   formActions.append(saveBtn, cancelBtn);
 
   form.append(labelIn, valueIn, groupIn, sensWrap, formActions);
@@ -72,6 +73,7 @@ export function mountSavedDetailsUI({
   const listWrap = document.createElement('div');
   listWrap.className = 'details-groups';
   container.append(toolbar, form, listWrap);
+  applyI18n(container);
 
   let items = [];
   let editingId = null;
@@ -109,7 +111,7 @@ export function mountSavedDetailsUI({
       });
       resetForm();
       renderList();
-      if (onStatus) onStatus('Saved detail updated.', 'ok');
+      if (onStatus) onStatus({ key: 'detailSaved' }, 'ok');
     } catch (err) {
       if (onStatus) onStatus(err.message, 'err');
     }
@@ -123,7 +125,7 @@ export function mountSavedDetailsUI({
     if (filtered.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'details-empty';
-      empty.textContent = items.length === 0 ? 'No saved details yet. Click "Add detail" to save reusable text.' : 'No matching details.';
+      bindI18n(empty, items.length === 0 ? 'detailsEmptyNone' : 'detailsEmptyNoMatch');
       listWrap.appendChild(empty);
       return;
     }
@@ -160,7 +162,7 @@ export function mountSavedDetailsUI({
         if (it.sensitive) {
           const badge = document.createElement('span');
           badge.className = 'detail-badge-sens';
-          badge.textContent = 'Sensitive';
+          bindI18n(badge, 'sensitiveBadge');
           top.appendChild(badge);
         }
 
@@ -177,7 +179,7 @@ export function mountSavedDetailsUI({
           const insBtn = document.createElement('button');
           insBtn.type = 'button';
           insBtn.className = 'btn-card btn-allow';
-          insBtn.textContent = 'Insert';
+          bindI18n(insBtn, 'insertBtn');
           insBtn.addEventListener('click', () => onInsert(it, insBtn));
           acts.appendChild(insBtn);
         }
@@ -185,21 +187,21 @@ export function mountSavedDetailsUI({
         const copyBtn = document.createElement('button');
         copyBtn.type = 'button';
         copyBtn.className = 'btn-card';
-        copyBtn.textContent = 'Copy';
+        bindI18n(copyBtn, 'copyBtn');
         copyBtn.addEventListener('click', async () => {
           try {
             await navigator.clipboard.writeText(it.value);
-            copyBtn.textContent = 'Copied';
-            setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1200);
+            bindI18n(copyBtn, 'copiedBtn');
+            setTimeout(() => { bindI18n(copyBtn, 'copyBtn'); }, 1200);
           } catch (_) {
-            if (onStatus) onStatus('Clipboard access failed.', 'err');
+            if (onStatus) onStatus({ key: 'clipboardFailed' }, 'err');
           }
         });
 
         const editBtn = document.createElement('button');
         editBtn.type = 'button';
         editBtn.className = 'btn-card';
-        editBtn.textContent = 'Edit';
+        bindI18n(editBtn, 'editBtn');
         editBtn.addEventListener('click', () => {
           editingId = it.id;
           labelIn.value = it.label;
@@ -213,7 +215,7 @@ export function mountSavedDetailsUI({
         const delBtn = document.createElement('button');
         delBtn.type = 'button';
         delBtn.className = 'btn-card';
-        delBtn.textContent = 'Delete';
+        bindI18n(delBtn, 'deleteBtn');
         delBtn.addEventListener('click', async () => {
           items = await deleteSavedDetail(it.id);
           renderList();

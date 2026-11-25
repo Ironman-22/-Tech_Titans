@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="sidepanel.css">
   <link rel="stylesheet" href="details.css">
 </head>
-<body>
+<body class="i18n-loading">
   <header class="header">
     <div class="header-row">
       <div class="brand">
@@ -19,28 +19,28 @@
       </div>
 
       <div class="header-controls">
-        <select id="provider-select" class="select-compact" aria-label="AI provider">
-          <option value="auto">Auto</option>
+        <select id="provider-select" class="select-compact" aria-label="AI provider" data-i18n-aria="ariaProvider">
+          <option value="auto" data-i18n="providerAuto">Auto</option>
           <option value="gemini">Gemini</option>
           <option value="groq">Groq</option>
         </select>
 
-        <select id="lang-select" class="select-compact" aria-label="Language">
+        <select id="lang-select" class="select-compact" aria-label="Language" data-i18n-aria="ariaLanguage">
           <option value="en">English</option>
           <option value="hi">हिन्दी</option>
           <option value="kn">ಕನ್ನಡ</option>
         </select>
 
-        <button id="btn-helper" type="button" class="btn-helper" aria-pressed="false" title="Toggle Helper Mode">Helper</button>
+        <button id="btn-helper" type="button" class="btn-helper" aria-pressed="false" title="Toggle Helper Mode" data-i18n="helperBtn" data-i18n-title="helperTitle">Helper</button>
 
-        <button id="btn-refresh" type="button" class="icon-btn" aria-label="Refresh page snapshot" title="Refresh page">
+        <button id="btn-refresh" type="button" class="icon-btn" aria-label="Refresh page snapshot" title="Refresh page" data-i18n-aria="refreshAria" data-i18n-title="refreshTitle">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <polyline points="23 4 23 10 17 10"/>
             <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
           </svg>
         </button>
 
-        <button id="btn-settings" type="button" class="icon-btn" aria-label="Open Settings" title="Settings">
+        <button id="btn-settings" type="button" class="icon-btn" aria-label="Open Settings" title="Settings" data-i18n-aria="settingsAria" data-i18n-title="settingsTitle">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <circle cx="12" cy="12" r="3"/>
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
@@ -51,50 +51,50 @@
 
     <div class="page-bar">
       <div class="page-info-row">
-        <span id="page-title" class="page-title">Reading page...</span>
-        <span id="page-chars" class="page-chars">Read 0 chars</span>
+        <span id="page-title" class="page-title" data-i18n="readingPage">Reading page...</span>
+        <span id="page-chars" class="page-chars" data-i18n="readChars" data-i18n-vars='{"n":0}'>Read 0 chars</span>
       </div>
       <div class="translate-bar">
-        <button id="btn-translate-page" type="button" class="btn-bar">Translate page</button>
-        <button id="btn-show-original" type="button" class="btn-bar hidden">Show original</button>
-        <button id="btn-translate-cancel" type="button" class="btn-bar btn-bar-stop hidden">Cancel</button>
+        <button id="btn-translate-page" type="button" class="btn-bar" data-i18n="translatePageBtn">Translate page</button>
+        <button id="btn-show-original" type="button" class="btn-bar hidden" data-i18n="showOriginalBtn">Show original</button>
+        <button id="btn-translate-cancel" type="button" class="btn-bar btn-bar-stop hidden" data-i18n="cancelBtn">Cancel</button>
         <span id="translate-status" class="translate-status" aria-live="polite"></span>
       </div>
     </div>
 
-    <nav class="tab-bar" aria-label="Side panel sections">
-      <button id="tab-btn-chat" type="button" class="tab-btn active" data-tab="tab-chat">Chat</button>
-      <button id="tab-btn-details" type="button" class="tab-btn" data-tab="tab-details">Details</button>
+    <nav class="tab-bar" aria-label="Side panel sections" data-i18n-aria="ariaTabs">
+      <button id="tab-btn-chat" type="button" class="tab-btn active" data-tab="tab-chat" data-i18n="tabChat">Chat</button>
+      <button id="tab-btn-details" type="button" class="tab-btn" data-tab="tab-details" data-i18n="tabDetails">Details</button>
     </nav>
   </header>
 
   <div id="first-run-notice" class="banner notice hidden">
-    <span>Page text and your questions are sent to the AI provider you choose.</span>
-    <button id="btn-ack-notice" type="button" class="btn-link">Dismiss</button>
+    <span data-i18n="firstRunNotice">Page text and your questions are sent to the AI provider you choose.</span>
+    <button id="btn-ack-notice" type="button" class="btn-link" data-i18n="dismissBtn">Dismiss</button>
   </div>
 
   <div id="no-key-banner" class="banner key-banner hidden">
-    <span>Add an API key in Settings</span>
-    <button id="btn-open-settings" type="button" class="btn-small">Open Settings</button>
+    <span data-i18n="noKeyPrompt">Add an API key in Settings</span>
+    <button id="btn-open-settings" type="button" class="btn-small" data-i18n="openSettingsBtn">Open Settings</button>
   </div>
 
   <section id="tab-chat" class="tab-pane active">
     <main class="chat-area">
       <div id="helper-panel" class="helper-panel hidden">
-        <div id="helper-goal" class="helper-goal">Helper Mode</div>
+        <div id="helper-goal" class="helper-goal" data-i18n="guidedSteps">Guided Steps</div>
         <ol id="helper-steps" class="helper-steps"></ol>
         <div id="helper-explain" class="helper-explain"></div>
         <div id="helper-actions" class="helper-actions"></div>
       </div>
 
       <div id="empty-state" class="empty-state">
-        <p class="empty-prompt">Ask a question, find text, search, or fill forms.</p>
+        <p class="empty-prompt" data-i18n="emptyPrompt">Ask a question, find text, search, or fill forms.</p>
         <div class="chips-row">
-          <button id="chip-what-is-page" type="button" class="chip">What is this page?</button>
-          <button id="chip-find" type="button" class="chip">Find something</button>
-          <button id="chip-search" type="button" class="chip">Search this site</button>
-          <button id="chip-open-url" type="button" class="chip">Open a website</button>
-          <button id="chip-fill" type="button" class="chip">Fill this form</button>
+          <button id="chip-what-is-page" type="button" class="chip" data-i18n="chipWhat">What is this page?</button>
+          <button id="chip-find" type="button" class="chip" data-i18n="chipFind">Find something</button>
+          <button id="chip-search" type="button" class="chip" data-i18n="chipSearch">Search this site</button>
+          <button id="chip-open-url" type="button" class="chip" data-i18n="chipOpenUrl">Open a website</button>
+          <button id="chip-fill" type="button" class="chip" data-i18n="chipFill">Fill this form</button>
         </div>
       </div>
 
@@ -105,11 +105,11 @@
       <div id="mic-status" class="mic-status hidden" aria-live="polite"></div>
       <label class="auto-allow-row">
         <input id="chk-auto-allow" type="checkbox">
-        <span>Auto-allow navigation clicks</span>
+        <span data-i18n="autoAllowNav">Auto-allow navigation clicks</span>
       </label>
       <form id="composer-form" class="composer">
-        <textarea id="chat-input" class="composer-input" rows="1" placeholder="Ask about this page, find text, search, or fill..." aria-label="Ask a question or give a command"></textarea>
-        <button id="btn-mic" type="button" class="icon-btn mic-btn" aria-label="Voice input" title="Voice input">
+        <textarea id="chat-input" class="composer-input" rows="1" placeholder="Ask about this page, find text, search, or fill..." aria-label="Ask a question or give a command" data-i18n-placeholder="inputPlaceholder" data-i18n-aria="inputAria"></textarea>
+        <button id="btn-mic" type="button" class="icon-btn mic-btn" aria-label="Voice input" title="Voice input" data-i18n-aria="voiceInputAria" data-i18n-title="voiceInputTitle">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
             <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
@@ -117,8 +117,8 @@
             <line x1="8" y1="23" x2="16" y2="23"/>
           </svg>
         </button>
-        <button id="btn-stop" type="button" class="stop-btn hidden" aria-label="Stop agent" title="Stop (Esc)">Stop</button>
-        <button id="btn-send" type="submit" class="send-btn" aria-label="Send message" title="Send">
+        <button id="btn-stop" type="button" class="stop-btn hidden" aria-label="Stop agent" title="Stop (Esc)" data-i18n="stopBtn" data-i18n-aria="stopAria" data-i18n-title="stopTitle">Stop</button>
+        <button id="btn-send" type="submit" class="send-btn" aria-label="Send message" title="Send" data-i18n-aria="sendAria" data-i18n-title="sendTitle">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <line x1="22" y1="2" x2="11" y2="13"/>
             <polygon points="22 2 15 22 11 13 2 9 22 2"/>

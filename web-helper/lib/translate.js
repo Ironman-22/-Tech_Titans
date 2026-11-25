@@ -1,5 +1,7 @@
 // FormMitra — Whole-Page Translation Orchestrator
 
+import { t } from './i18n.js';
+
 const LANG_NAMES = {
   en: 'English',
   hi: 'Hindi (हिन्दी)',
@@ -38,7 +40,7 @@ async function translateBatchWithRetry({ batch, targetLang, sendAction, taskId, 
   });
 
   if (ctl.aborted) return { aborted: true };
-  if (!resp.ok) return { error: resp.summary || resp.error || 'Translation request failed.' };
+  if (!resp.ok) return { error: resp.summary || resp.error || t('translationFailed') };
 
   const arr = extractTranslatedArray(resp.data, batch.length);
   if (arr) {
@@ -90,7 +92,7 @@ export async function runViewportTranslation({ targetLang, taskId, sendAction, o
     const col = await sendAction({ action: 'TRANSLATE_COLLECT', targetLang, viewportOnly: true });
     if (ctl.aborted) break;
     if (!col.ok) {
-      return { ok: false, error: col.error || "I can't read this browser page" };
+      return { ok: false, error: col.error || t('cantReadPage') };
     }
 
     hasMoreOffscreen = Boolean(col.hasMoreOffscreen);
@@ -98,7 +100,7 @@ export async function runViewportTranslation({ targetLang, taskId, sendAction, o
     if (items.length === 0) break;
 
     batchNum += 1;
-    onProgress(`Translating batch ${batchNum}...`);
+    onProgress({ key: 'translatingBatch', vars: { n: batchNum } });
 
     const res = await translateBatchWithRetry({ batch: items, targetLang, sendAction, taskId, ctl });
     if (res.aborted || ctl.aborted) break;

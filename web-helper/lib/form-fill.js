@@ -1,6 +1,7 @@
 // FormMitra — Form Field Mapping & Review Resolution (values and sensitive items stay local)
 
 import { isSensitiveLabel, getSavedDetails } from './storage.js';
+import { t, bindI18n } from './i18n.js';
 
 export function buildFormFillPrompt(formFields, nonSensitiveLabels) {
   const safeFields = (formFields || []).map((f) => ({
@@ -60,7 +61,8 @@ export function resolveFormFillPlan(formFields, savedDetails, aiMappings) {
         fieldId: field.id,
         fieldLabel: field.label || field.type,
         value: null,
-        displayValue: 'enter this yourself',
+        displayValue: t('enterYourself'),
+        displayKey: 'enterYourself',
         confidence: 0,
         tier: 'sensitive',
         checked: false,
@@ -104,22 +106,22 @@ export async function runFormFillFlow({ inputText, state, dom, sendAction, refre
   await refreshSnapshot(false);
   if (!state.snapshot || state.restricted) { onUnreadable(); return; }
   if (!state.hasKey) {
-    onError('Add an API key in Settings.', 'Neither Gemini nor Groq API key is configured.');
+    onError({ key: 'noKeyErrSummary' }, t('noKeyErrDetail'));
     return;
   }
   const fields = state.snapshot?.formFields || [];
-  if (fields.length === 0) { onReply('No visible form fields were found on this page.', null); return; }
+  if (fields.length === 0) { onReply(t('noFormFields'), null); return; }
 
   const details = await getSavedDetails();
   const nonSensitiveLabels = details.filter((d) => !d.sensitive).map((d) => d.label);
   if (nonSensitiveLabels.length === 0 && !fields.some((f) => f.type === 'password')) {
-    onReply('Add non-sensitive details in the Details tab first, or use Insert for sensitive items.', null);
+    onReply(t('needDetailsFirst'), null);
     return;
   }
 
   const pending = document.createElement('div');
   pending.className = 'msg msg-pending';
-  pending.textContent = 'Matching form fields...';
+  bindI18n(pending, 'matchingFields');
   dom.chatMessages.appendChild(pending);
   dom.emptyState.classList.add('hidden');
   dom.chatMessages.parentElement.scrollTop = dom.chatMessages.parentElement.scrollHeight;
@@ -131,8 +133,8 @@ export async function runFormFillFlow({ inputText, state, dom, sendAction, refre
   }
   pending.remove();
 
-  if (!resp.ok) { onError(resp.summary || 'Could not match form fields.', resp.error || ''); return; }
+  if (!resp.ok) { onError(resp.summary || { key: 'errCouldNotMatch' }, resp.error || ''); return; }
   const rows = resolveFormFillPlan(fields, details, resp.data?.mappings);
-  if (rows.length === 0) { onReply('None of your saved details matched the fields on this form.', resp.provider); return; }
+  if (rows.length === 0) { onReply(t('noFieldsMatched'), resp.provider); return; }
   onCard(rows, resp.provider);
 }

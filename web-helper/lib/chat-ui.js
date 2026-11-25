@@ -1,5 +1,15 @@
 // FormMitra — Chat Message, Find Card, Approval Card, Form Fill Review & Error Bubble Renderers
 
+import { t, bindI18n, clearI18n } from './i18n.js';
+
+function setTextOrI18n(el, spec) {
+  if (spec && typeof spec === 'object' && spec.key) bindI18n(el, spec.key, spec.vars || null);
+  else {
+    clearI18n(el);
+    el.textContent = String(spec ?? '');
+  }
+}
+
 function appendAndScroll(container, emptyState, el) {
   container.appendChild(el);
   emptyState.classList.toggle('hidden', container.children.length > 0);
@@ -24,7 +34,7 @@ export function appendAssistantMessage(container, emptyState, replyText, provide
   if (provider) {
     const tag = document.createElement('span');
     tag.className = 'msg-provider';
-    tag.textContent = provider === 'groq' ? 'via Groq' : 'via Gemini';
+    bindI18n(tag, 'viaProvider', { provider: provider === 'groq' ? 'Groq' : 'Gemini' });
     wrap.appendChild(tag);
   }
 
@@ -36,8 +46,12 @@ export function appendFindCard(container, emptyState, query, count, index, sendA
   wrap.className = 'msg msg-card';
 
   const label = document.createElement('div');
-  const fmt = (c, idx) => (c === 0 ? '0 matches' : `${c} ${c === 1 ? 'match' : 'matches'} (${idx} of ${c} for "${query}")`);
-  label.textContent = fmt(count, index);
+  const setCountLabel = (c, idx) => {
+    if (c === 0) bindI18n(label, 'findZero');
+    else if (c === 1) bindI18n(label, 'findOneMatch', { idx, query });
+    else bindI18n(label, 'findManyMatches', { c, idx, query });
+  };
+  setCountLabel(count, index);
 
   const actions = document.createElement('div');
   actions.className = 'card-actions';
@@ -45,31 +59,31 @@ export function appendFindCard(container, emptyState, query, count, index, sendA
   const prevBtn = document.createElement('button');
   prevBtn.type = 'button';
   prevBtn.className = 'btn-card';
-  prevBtn.textContent = 'Prev';
+  bindI18n(prevBtn, 'prevBtn');
   prevBtn.disabled = count === 0;
 
   const nextBtn = document.createElement('button');
   nextBtn.type = 'button';
   nextBtn.className = 'btn-card';
-  nextBtn.textContent = 'Next';
+  bindI18n(nextBtn, 'nextBtn');
   nextBtn.disabled = count === 0;
 
   const clearBtn = document.createElement('button');
   clearBtn.type = 'button';
   clearBtn.className = 'btn-card';
-  clearBtn.textContent = 'Clear';
+  bindI18n(clearBtn, 'clearBtn');
   clearBtn.disabled = count === 0;
 
   const nav = async (dir) => {
     const res = await sendAction({ action: 'FIND_NAV', dir });
-    if (res.ok) label.textContent = fmt(res.count, res.index);
+    if (res.ok) setCountLabel(res.count, res.index);
   };
 
   prevBtn.addEventListener('click', () => nav('prev'));
   nextBtn.addEventListener('click', () => nav('next'));
   clearBtn.addEventListener('click', async () => {
     await sendAction({ action: 'FIND_CLEAR' });
-    label.textContent = 'Highlights cleared.';
+    bindI18n(label, 'findCleared');
     prevBtn.disabled = true;
     nextBtn.disabled = true;
     clearBtn.disabled = true;
@@ -85,14 +99,14 @@ export function appendErrorBubble(container, emptyState, summaryText, rawDetail,
   wrap.className = 'msg msg-error';
 
   const line = document.createElement('div');
-  line.textContent = summaryText;
+  setTextOrI18n(line, summaryText);
   wrap.appendChild(line);
 
   if (rawDetail) {
     const details = document.createElement('details');
     details.className = 'error-details';
     const summary = document.createElement('summary');
-    summary.textContent = 'Details';
+    bindI18n(summary, 'detailsLabel');
     const pre = document.createElement('pre');
     pre.className = 'error-raw';
     pre.textContent = rawDetail;
@@ -105,7 +119,7 @@ export function appendErrorBubble(container, emptyState, summaryText, rawDetail,
   const retryBtn = document.createElement('button');
   retryBtn.type = 'button';
   retryBtn.className = 'btn-retry';
-  retryBtn.textContent = 'Retry';
+  bindI18n(retryBtn, 'retryBtn');
   retryBtn.addEventListener('click', () => {
     wrap.remove();
     onRetry();
@@ -124,7 +138,7 @@ export function promptActionApproval(container, emptyState, promptText, ctl) {
     wrap.className = 'msg msg-card';
 
     const text = document.createElement('div');
-    text.textContent = promptText;
+    setTextOrI18n(text, promptText);
 
     const actions = document.createElement('div');
     actions.className = 'card-actions';
@@ -132,27 +146,27 @@ export function promptActionApproval(container, emptyState, promptText, ctl) {
     const allowBtn = document.createElement('button');
     allowBtn.type = 'button';
     allowBtn.className = 'btn-card btn-allow';
-    allowBtn.textContent = 'Allow';
+    bindI18n(allowBtn, 'allowBtn');
 
     const skipBtn = document.createElement('button');
     skipBtn.type = 'button';
     skipBtn.className = 'btn-card';
-    skipBtn.textContent = 'Skip';
+    bindI18n(skipBtn, 'skipBtn');
 
     const statusNote = document.createElement('span');
     statusNote.className = 'card-note';
 
-    const finish = (choice, note) => {
+    const finish = (choice, noteKey) => {
       ctl.onAbort = null;
       allowBtn.disabled = true;
       skipBtn.disabled = true;
-      statusNote.textContent = note;
+      bindI18n(statusNote, noteKey);
       resolve(choice);
     };
 
-    ctl.onAbort = () => finish('stop', 'Stopped');
-    allowBtn.addEventListener('click', () => finish('allow', 'Allowed'));
-    skipBtn.addEventListener('click', () => finish('skip', 'Skipped'));
+    ctl.onAbort = () => finish('stop', 'statusStopped');
+    allowBtn.addEventListener('click', () => finish('allow', 'statusAllowed'));
+    skipBtn.addEventListener('click', () => finish('skip', 'statusSkipped'));
 
     actions.append(allowBtn, skipBtn, statusNote);
     wrap.append(text, actions);
@@ -166,7 +180,7 @@ export function appendFormFillCard(container, emptyState, rows, provider, onAppl
 
   const header = document.createElement('div');
   header.className = 'fill-header';
-  header.textContent = `Form Fill Review (${rows.length} ${rows.length === 1 ? 'field' : 'fields'})`;
+  bindI18n(header, rows.length === 1 ? 'fillReviewHeaderOne' : 'fillReviewHeader', { n: rows.length });
   wrap.appendChild(header);
 
   const list = document.createElement('div');
@@ -191,12 +205,14 @@ export function appendFormFillCard(container, emptyState, rows, provider, onAppl
     lbl.textContent = row.fieldLabel;
     const val = document.createElement('span');
     val.className = row.tier === 'sensitive' ? 'fill-field-sens' : 'fill-field-val';
-    val.textContent = row.displayValue;
+    if (row.displayKey) bindI18n(val, row.displayKey);
+    else val.textContent = row.displayValue;
     info.append(lbl, val);
 
     const conf = document.createElement('span');
     conf.className = 'fill-conf';
-    conf.textContent = row.tier === 'sensitive' ? 'Sensitive' : `${Math.round(row.confidence * 100)}%`;
+    if (row.tier === 'sensitive') bindI18n(conf, 'sensitiveBadge');
+    else conf.textContent = `${Math.round(row.confidence * 100)}%`;
 
     item.append(cb, info, conf);
     list.appendChild(item);
@@ -208,24 +224,26 @@ export function appendFormFillCard(container, emptyState, rows, provider, onAppl
   const applyBtn = document.createElement('button');
   applyBtn.type = 'button';
   applyBtn.className = 'btn-card btn-allow';
-  applyBtn.textContent = 'Apply';
+  bindI18n(applyBtn, 'applyBtn');
   applyBtn.disabled = !rows.some((r) => !r.disabled);
 
   const note = document.createElement('span');
   note.className = 'card-note';
-  if (provider) note.textContent = provider === 'groq' ? 'via Groq' : 'via Gemini';
+  if (provider) bindI18n(note, 'viaProvider', { provider: provider === 'groq' ? 'Groq' : 'Gemini' });
 
   applyBtn.addEventListener('click', async () => {
     const selected = rowChecks
       .filter(({ row, cb }) => !row.disabled && cb.checked)
       .map(({ row }) => ({ id: row.fieldId, value: row.value, tier: row.tier }));
     if (selected.length === 0) {
-      note.textContent = 'No rows selected.';
+      bindI18n(note, 'noRowsSelected');
       return;
     }
     applyBtn.disabled = true;
     const res = await onApply(selected);
-    note.textContent = res.ok ? `Applied ${res.count} field(s).` : (res.error || 'Apply failed.');
+    if (res.ok) bindI18n(note, 'appliedFields', { n: res.count });
+    else if (res.error) { clearI18n(note); note.textContent = res.error; }
+    else bindI18n(note, 'applyFailed');
   });
 
   footer.append(applyBtn, note);
@@ -238,7 +256,7 @@ export function appendUnreadablePageCard(container, emptyState, onNavigate) {
   wrap.className = 'msg msg-card';
 
   const msg = document.createElement('div');
-  msg.textContent = "I can't read this browser page. I can open a website for you instead.";
+  bindI18n(msg, 'unreadableCardMsg');
 
   const actions = document.createElement('div');
   actions.className = 'card-actions';
@@ -246,7 +264,7 @@ export function appendUnreadablePageCard(container, emptyState, onNavigate) {
   const googleBtn = document.createElement('button');
   googleBtn.type = 'button';
   googleBtn.className = 'btn-card btn-allow';
-  googleBtn.textContent = 'Open Google';
+  bindI18n(googleBtn, 'openGoogleBtn');
 
   const form = document.createElement('form');
   form.className = 'unreadable-form';
@@ -254,22 +272,28 @@ export function appendUnreadablePageCard(container, emptyState, onNavigate) {
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'unreadable-input';
-  input.placeholder = 'Go to a website or search';
-  input.setAttribute('aria-label', 'Go to a website or search');
+  input.placeholder = t('goWebsitePh');
+  input.setAttribute('aria-label', t('goWebsitePh'));
+  input.dataset.i18nPlaceholder = 'goWebsitePh';
+  input.dataset.i18nAria = 'goWebsitePh';
 
   const goBtn = document.createElement('button');
   goBtn.type = 'submit';
   goBtn.className = 'btn-card';
-  goBtn.textContent = 'Go';
+  bindI18n(goBtn, 'goBtn');
 
   const note = document.createElement('span');
   note.className = 'card-note';
 
   const runNav = async (targetText) => {
-    note.textContent = 'Opening...';
+    bindI18n(note, 'openingStatus');
     const res = await onNavigate(targetText);
-    if (!res.ok) note.textContent = res.error || 'Could not open website.';
-    else note.textContent = 'Opened.';
+    if (!res.ok) {
+      if (res.error) { clearI18n(note); note.textContent = res.error; }
+      else bindI18n(note, 'openFailed');
+    } else {
+      bindI18n(note, 'openedStatus');
+    }
   };
 
   googleBtn.addEventListener('click', () => runNav('https://www.google.com/'));
@@ -290,6 +314,6 @@ export function appendUnreadablePageCard(container, emptyState, onNavigate) {
 export function appendStepLine(container, emptyState, text) {
   const el = document.createElement('div');
   el.className = 'msg msg-step';
-  el.textContent = text;
+  setTextOrI18n(el, text);
   appendAndScroll(container, emptyState, el);
 }
