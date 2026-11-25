@@ -19,6 +19,7 @@
  *   HIGHLIGHT_CLEAR   (Sidepanel -> Background -> Content) : { action: 'HIGHLIGHT_CLEAR' } -> { ok: true }
  *   LLM_CALL          (Sidepanel -> Background)            : { action: 'LLM_CALL', systemPrompt, messages, taskId? } -> { ok, data, provider, model } | { ok: false, error, summary, code? }
  *   TRANSCRIBE        (Sidepanel -> Background)            : { action: 'TRANSCRIBE', base64, mimeType, taskId? } -> { ok, data: { text, language }, provider } | { ok: false, error, summary, code? }
+ *   OPEN_URL          (Sidepanel -> Background)            : { action: 'OPEN_URL', url } -> { ok, success, url?, error? }
  *   TEST_PROVIDER     (Options -> Background)              : { action: 'TEST_PROVIDER', provider, apiKey?, model? } -> { ok, provider, model } | { ok: false, error, summary }
  *   LIST_MODELS       (Options -> Background)              : { action: 'LIST_MODELS', provider, apiKey? } -> { ok, models } | { ok: false, error, summary }
  */
@@ -227,6 +228,29 @@ async function runQueuedProviderCall({ invoke, taskId, autoDefault = 'gemini', r
   return { ok: false, summary: candidates.length > 1 ? 'Both AI providers failed.' : lastSummary, error: errors.join(' | ') };
 }
 
+async function handleOpenUrl(rawUrl) {
+  let safeUrl = null;
+  try {
+    const parsed = new URL(String(rawUrl || '').trim());
+    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') safeUrl = parsed.href;
+  } catch (_) {}
+  if (!safeUrl) return { ok: false, success: false, error: 'Only http:// and https:// URLs are allowed.' };
+
+  const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => []);
+  const tab = (tabs && tabs[0]) || null;
+  if (!tab || tab.id == null || tab.id < 0) return { ok: false, success: false, error: 'No active tab found.' };
+
+  try {
+    const donePromise = waitForTabComplete(tab.id, 8000);
+    await chrome.tabs.update(tab.id, { url: safeUrl });
+    await donePromise;
+    await new Promise((r) => setTimeout(r, 200));
+    return { ok: true, success: true, url: safeUrl };
+  } catch (err) {
+    return { ok: false, success: false, error: err.message || 'Could not open URL.' };
+  }
+}
+
 async function handleTestProvider({ provider, apiKey, model }) {
   const settings = await getSettings();
   const rawKey = typeof apiKey === 'string' ? apiKey.trim() : (provider === 'gemini' ? settings.whGeminiKey : settings.whGroqKey);
@@ -284,6 +308,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       recordAffinity: false,
       invoke: (entry) => transcribeAudio({ ...entry, base64: message.base64, mimeType: message.mimeType })
     })).then((r) => safeReply(sendResponse, r)).catch((e) => safeReply(sendResponse, { ok: false, summary: 'Transcription failed.', error: e.message }));
+    return true;
+  }
+
+  if (message.action === 'OPEN_URL') {
+    handleOpenUrl(message.url).then((r) => safeReply(sendResponse, r)).catch((e) => safeReply(sendResponse, { ok: false, success: false, error: e.message }));
     return true;
   }
 

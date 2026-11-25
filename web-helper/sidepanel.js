@@ -1,8 +1,8 @@
 // FormMitra — Side Panel Controller (Chat, Agent, Whole-Page Translation, Saved Details, Form Fill)
 
 import { getSettings, saveSettingsPatch, getSavedDetails } from './lib/storage.js';
-import { classifyInput, runAgentLoop } from './lib/agent.js';
-import { appendUserMessage, appendAssistantMessage, appendFindCard, appendErrorBubble, promptActionApproval, appendFormFillCard } from './lib/chat-ui.js';
+import { classifyInput, isUnreadableSnapshot, normalizeDirectUrlOrQuery, runAgentLoop } from './lib/agent.js';
+import { appendUserMessage, appendAssistantMessage, appendFindCard, appendErrorBubble, promptActionApproval, appendFormFillCard, appendUnreadablePageCard } from './lib/chat-ui.js';
 import { runViewportTranslation } from './lib/translate.js';
 import { buildFormFillPrompt, resolveFormFillPlan } from './lib/form-fill.js';
 import { mountSavedDetailsUI } from './lib/details-ui.js';
@@ -33,6 +33,7 @@ const dom = {
   chipWhatIsPage: $('chip-what-is-page'),
   chipFind: $('chip-find'),
   chipSearch: $('chip-search'),
+  chipOpenUrl: $('chip-open-url'),
   chipFill: $('chip-fill'),
   chatMessages: $('chat-messages'),
   chkAutoAllow: $('chk-auto-allow'),
@@ -59,6 +60,7 @@ const state = {
   translationActive: false,
   translateCtl: null,
   translatedCount: 0,
+  unreadableInput: null,
   detailsUi: null,
   voice: null
 };
@@ -182,11 +184,28 @@ async function restoreOriginalPage() {
   setTranslationControls(false, false, '');
 }
 
+async function openFromCard(rawText) {
+  const resolved = normalizeDirectUrlOrQuery(rawText);
+  if (!resolved || resolved.blocked) return { ok: false, error: 'Only http:// and https:// URLs are allowed.' };
+  const res = await sendAction({ action: 'OPEN_URL', url: resolved.url });
+  if (res.ok) await refreshSnapshot(false);
+  return res;
+}
+
+function showUnreadableCard() {
+  if (state.unreadableInput && state.unreadableInput.isConnected) {
+    state.unreadableInput.focus();
+    return;
+  }
+  state.unreadableInput = appendUnreadablePageCard(dom.chatMessages, dom.emptyState, openFromCard);
+}
+
 async function refreshSnapshot(clearChat = true) {
   if (clearChat) {
     stopCurrentTask();
     state.history = [];
     state.taskId = createTaskId();
+    state.unreadableInput = null;
     dom.chatMessages.textContent = '';
     dom.chkAutoAllow.checked = false;
     updateEmptyState();
@@ -200,28 +219,29 @@ async function refreshSnapshot(clearChat = true) {
   state.restricted = false;
 
   const resp = await sendAction({ action: 'SNAPSHOT' });
-  if (resp.ok && resp.snapshot) {
+  if (resp.ok && resp.snapshot && !isUnreadableSnapshot(resp.snapshot, false)) {
     state.snapshot = resp.snapshot;
     state.restricted = false;
+    state.unreadableInput = null;
     dom.pageTitle.textContent = resp.snapshot.title || resp.snapshot.url || 'Untitled page';
     dom.pageChars.textContent = `Read ${(resp.snapshot.visibleText || '').length} chars`;
     return true;
   }
 
   state.snapshot = null;
-  state.restricted = Boolean(resp.restricted);
-  dom.pageTitle.textContent = resp.restricted ? "I can't read this browser page" : 'Page not readable';
+  state.restricted = true;
+  dom.pageTitle.textContent = "I can't read this browser page";
   dom.pageChars.textContent = 'Read 0 chars';
   return false;
 }
 
 async function handleFormFill(inputText = 'Fill this form') {
+  await refreshSnapshot(false);
+  if (isUnreadableSnapshot(state.snapshot, state.restricted)) { showUnreadableCard(); return; }
   if (!state.hasKey) {
     appendErrorBubble(dom.chatMessages, dom.emptyState, 'Add an API key in Settings.', 'Neither Gemini nor Groq API key is configured.', () => handleUserSubmit(inputText, true));
     return;
   }
-
-  await refreshSnapshot(false);
   const fields = state.snapshot?.formFields || [];
   if (fields.length === 0) {
     appendAssistantMessage(dom.chatMessages, dom.emptyState, 'No visible form fields were found on this page.', null);
@@ -284,13 +304,9 @@ async function handleUserSubmit(rawText, isRetry = false) {
   const route = classifyInput(input);
   if (route.mode === 'find') {
     const res = await sendAction({ action: 'FIND', query: route.query });
-    if (!res.ok) appendErrorBubble(dom.chatMessages, dom.emptyState, res.error || 'Could not search this page.', '', () => handleUserSubmit(input, true));
+    if (res.restricted) showUnreadableCard();
+    else if (!res.ok) appendErrorBubble(dom.chatMessages, dom.emptyState, res.error || 'Could not search this page.', '', () => handleUserSubmit(input, true));
     else appendFindCard(dom.chatMessages, dom.emptyState, route.query, res.count || 0, res.index || 0, sendAction);
-    return;
-  }
-
-  if (!state.hasKey) {
-    appendErrorBubble(dom.chatMessages, dom.emptyState, 'Add an API key in Settings.', 'Neither Gemini nor Groq API key is configured.', () => handleUserSubmit(input, true));
     return;
   }
 
@@ -311,6 +327,7 @@ async function handleUserSubmit(rawText, isRetry = false) {
       onError: (sum, raw, retryFn) => appendErrorBubble(dom.chatMessages, dom.emptyState, sum, raw, retryFn),
       onFind: (q, cnt, idx) => appendFindCard(dom.chatMessages, dom.emptyState, q, cnt, idx, sendAction),
       onNoKey: () => dom.noKeyBanner.classList.remove('hidden'),
+      onUnreadable: showUnreadableCard,
       onAskApproval: (promptText, c) => promptActionApproval(dom.chatMessages, dom.emptyState, promptText, c),
       onRetry: () => handleUserSubmit(input, true)
     });
@@ -349,6 +366,7 @@ function wireEvents() {
   dom.chipWhatIsPage.addEventListener('click', () => handleUserSubmit('What is this page?'));
   dom.chipFind.addEventListener('click', () => prefillInput('Find '));
   dom.chipSearch.addEventListener('click', () => prefillInput('Search this site for '));
+  dom.chipOpenUrl.addEventListener('click', () => prefillInput('Open '));
   dom.chipFill.addEventListener('click', () => handleUserSubmit('Fill this form'));
 
   dom.btnStop.addEventListener('click', stopCurrentTask);

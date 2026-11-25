@@ -232,3 +232,57 @@ export function appendFormFillCard(container, emptyState, rows, provider, onAppl
   wrap.append(list, footer);
   appendAndScroll(container, emptyState, wrap);
 }
+
+export function appendUnreadablePageCard(container, emptyState, onNavigate) {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg msg-card';
+
+  const msg = document.createElement('div');
+  msg.textContent = "I can't read this browser page. I can open a website for you instead.";
+
+  const actions = document.createElement('div');
+  actions.className = 'card-actions';
+
+  const googleBtn = document.createElement('button');
+  googleBtn.type = 'button';
+  googleBtn.className = 'btn-card btn-allow';
+  googleBtn.textContent = 'Open Google';
+
+  const form = document.createElement('form');
+  form.className = 'unreadable-form';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'unreadable-input';
+  input.placeholder = 'Go to a website or search';
+  input.setAttribute('aria-label', 'Go to a website or search');
+
+  const goBtn = document.createElement('button');
+  goBtn.type = 'submit';
+  goBtn.className = 'btn-card';
+  goBtn.textContent = 'Go';
+
+  const note = document.createElement('span');
+  note.className = 'card-note';
+
+  const runNav = async (targetText) => {
+    note.textContent = 'Opening...';
+    const res = await onNavigate(targetText);
+    if (!res.ok) note.textContent = res.error || 'Could not open website.';
+    else note.textContent = 'Opened.';
+  };
+
+  googleBtn.addEventListener('click', () => runNav('https://www.google.com/'));
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const val = input.value.trim();
+    if (val) runNav(val);
+    else input.focus();
+  });
+
+  form.append(input, goBtn);
+  actions.append(googleBtn, form, note);
+  wrap.append(msg, actions);
+  appendAndScroll(container, emptyState, wrap);
+  return input;
+}
